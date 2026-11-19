@@ -149,7 +149,9 @@ final class CanvasModel {
     }
 
     /// Opens a card for `folder` (a subfolder in the parent card) to the right of the parent.
-    /// A parent can have many child cards. Each new child goes below the ones that are already open.
+    /// A parent can have many child cards. They stay in the same vertical order as their rows
+    /// in the parent, so the connector lines do not cross. When there is no space for the new
+    /// card, the sibling cards below it move down.
     func openChild(of parentID: FolderCard.ID, folder: URL) {
         guard let parent = cards.first(where: { $0.id == parentID }),
               let rowIndex = parent.entries.firstIndex(where: { $0.url == folder })
@@ -160,17 +162,42 @@ final class CanvasModel {
             return
         }
 
+        let entries = FolderLoader.entries(in: folder)
+        let height = CardLayout.height(entryCount: entries.count)
+        let spacing = CardLayout.siblingSpacing
+
+        // The open siblings, in the order of their rows in the parent.
+        let siblings = cards
+            .filter { $0.parentID == parentID }
+            .compactMap { card in parent.entries.firstIndex { $0.url == card.url }.map { (index: $0, card: card) } }
+            .sorted { $0.index < $1.index }
+        let above = siblings.last { $0.index < rowIndex }?.card
+        let below = siblings.filter { $0.index > rowIndex }.map(\.card)
+
+        // Start level with the clicked row, then stay between the sibling above and the sibling below.
         let rowY = CardLayout.rowCenterY(index: rowIndex, entryCount: parent.entries.count, scrollOffset: parent.scrollOffset)
         var y = parent.position.y + rowY - CardLayout.headerHeight / 2
-        let siblingBottoms = cards.filter { $0.parentID == parentID }.map { $0.position.y + $0.height }
-        if let lowest = siblingBottoms.max() {
-            y = max(y, lowest + CardLayout.siblingSpacing)
+        if let first = below.first {
+            y = min(y, first.position.y - height - spacing)
+        }
+        if let above {
+            y = max(y, above.position.y + above.height + spacing)
+        }
+
+        // Move the siblings below down where they would overlap.
+        var bottom = y + height
+        for sibling in below {
+            let top = max(sibling.position.y, bottom + spacing)
+            if top != sibling.position.y {
+                move(sibling.id, to: CGPoint(x: sibling.position.x, y: top))
+            }
+            bottom = top + sibling.height
         }
 
         cards.append(FolderCard(
             url: folder,
             position: CGPoint(x: parent.position.x + CardLayout.width + CardLayout.childSpacing, y: y),
-            entries: FolderLoader.entries(in: folder),
+            entries: entries,
             parentID: parentID
         ))
     }

@@ -16,25 +16,27 @@ struct CanvasModelTests {
         #expect(model.canvasPoint(fromView: anchor) == before)
     }
 
-    @Test func openChildPlacesCardsRightOfParentAndBelowEachOther() throws {
-        let root = try makeFolder(subfolders: ["a", "b"])
+    @Test func childCardsKeepTheOrderOfTheirRows() throws {
+        let root = try makeFolder(subfolders: ["a", "b", "c"])
         defer { try? FileManager.default.removeItem(at: root) }
         let model = CanvasModel()
         model.addFolders([root], at: CGPoint(x: 100, y: 100))
         let parent = model.cards[0]
-        let a = try #require(parent.entries.first { $0.name == "a" }).url
-        let b = try #require(parent.entries.first { $0.name == "b" }).url
+        let rows = parent.entries.map(\.url)
 
-        model.openChild(of: parent.id, folder: a)
-        model.openChild(of: parent.id, folder: b)
-        model.openChild(of: parent.id, folder: a)
+        // Open the bottom row first, then the top row (it must go above),
+        // then the middle row (no space, so the bottom card must move down).
+        model.openChild(of: parent.id, folder: rows[2])
+        model.openChild(of: parent.id, folder: rows[0])
+        model.openChild(of: parent.id, folder: rows[1])
+        model.openChild(of: parent.id, folder: rows[0])
 
-        #expect(model.cards.count == 3)
-        let childA = try #require(model.cards.first { $0.url == a })
-        let childB = try #require(model.cards.first { $0.url == b })
-        #expect(childA.position.x == 100 + CardLayout.width + CardLayout.childSpacing)
-        #expect(childB.position.y == childA.position.y + childA.height + CardLayout.siblingSpacing)
-        #expect(model.connections.count == 2)
+        #expect(model.cards.count == 4)
+        let children = try rows.map { row in try #require(model.cards.first { $0.url == row }) }
+        #expect(children.allSatisfy { $0.position.x == 100 + CardLayout.width + CardLayout.childSpacing })
+        for (upper, lower) in zip(children, children.dropFirst()) {
+            #expect(upper.position.y + upper.height + CardLayout.siblingSpacing <= lower.position.y)
+        }
     }
 
     @Test func closeAlsoClosesChildCards() throws {
