@@ -54,6 +54,32 @@ enum FolderLoader {
 final class CanvasModel {
     var cards: [FolderCard] = []
 
+    /// Viewport: a canvas point `p` shows at `p * zoom + pan` in the view.
+    var zoom: CGFloat = 1
+    var pan: CGSize = .zero
+
+    static let zoomRange: ClosedRange<CGFloat> = 0.25...3
+
+    /// Changes the zoom by `factor` and keeps the canvas point under `anchor` (view coordinates) in place.
+    func zoom(by factor: CGFloat, around anchor: CGPoint) {
+        let newZoom = min(max(zoom * factor, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        let ratio = newZoom / zoom
+        pan = CGSize(
+            width: anchor.x - (anchor.x - pan.width) * ratio,
+            height: anchor.y - (anchor.y - pan.height) * ratio
+        )
+        zoom = newZoom
+    }
+
+    func pan(by delta: CGSize) {
+        pan.width += delta.width
+        pan.height += delta.height
+    }
+
+    func canvasPoint(fromView point: CGPoint) -> CGPoint {
+        CGPoint(x: (point.x - pan.width) / zoom, y: (point.y - pan.height) / zoom)
+    }
+
     /// Adds a card for each dropped folder. Returns false when nothing was a folder.
     @discardableResult
     func addFolders(_ urls: [URL], at location: CGPoint) -> Bool {

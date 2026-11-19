@@ -137,14 +137,15 @@ struct FolderCardView: View {
 
     private var moveGesture: some Gesture {
         DragGesture(coordinateSpace: .global)
+            // The translation is in screen points. Divide by the zoom to get canvas points.
             .updating($dragOffset) { value, state, _ in
-                state = value.translation
+                state = CGSize(width: value.translation.width / model.zoom, height: value.translation.height / model.zoom)
             }
             .onChanged { _ in model.bringToFront(card.id) }
             .onEnded { value in
                 model.move(card.id, to: CGPoint(
-                    x: card.position.x + value.translation.width,
-                    y: card.position.y + value.translation.height
+                    x: card.position.x + value.translation.width / model.zoom,
+                    y: card.position.y + value.translation.height / model.zoom
                 ))
             }
     }
