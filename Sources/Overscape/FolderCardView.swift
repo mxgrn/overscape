@@ -5,15 +5,12 @@ struct FolderCardView: View {
     let card: FolderCard
     let model: CanvasModel
 
-    @GestureState private var dragOffset: CGSize = .zero
+    @State private var dragStart: CGPoint?
     @State private var selection: FileEntry.ID?
-
-    static let width: CGFloat = 490
-    static let rowHeight: CGFloat = 27
-    static let maxListHeight: CGFloat = 640
 
     private static let sizeColumn: CGFloat = 70
     private static let dateColumn: CGFloat = 120
+    nonisolated private static let listSpace = "cardList"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +20,7 @@ struct FolderCardView: View {
             Divider()
             list
         }
-        .frame(width: Self.width)
+        .frame(width: CardLayout.width)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -31,7 +28,7 @@ struct FolderCardView: View {
                 .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1.5)
         )
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-        .offset(x: card.position.x + dragOffset.width, y: card.position.y + dragOffset.height)
+        .offset(x: card.position.x, y: card.position.y)
     }
 
     // MARK: - Parts
@@ -63,7 +60,7 @@ struct FolderCardView: View {
             }
             .padding(.horizontal, 10)
         }
-        .frame(height: 32)
+        .frame(height: CardLayout.headerHeight)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .gesture(moveGesture)
@@ -78,30 +75,36 @@ struct FolderCardView: View {
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
-        .frame(height: 24)
+        .frame(height: CardLayout.columnHeaderHeight)
     }
 
     private var list: some View {
-        let contentHeight = CGFloat(max(card.entries.count, 1)) * Self.rowHeight
+        let openChildren = Set(model.cards.filter { $0.parentID == card.id }.map(\.url))
         return ScrollView {
             LazyVStack(spacing: 0) {
                 if card.entries.isEmpty {
                     Text("Empty folder")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .frame(height: Self.rowHeight)
+                        .frame(height: CardLayout.rowHeight)
                 }
                 ForEach(Array(card.entries.enumerated()), id: \.element.id) { index, entry in
-                    row(entry, index: index)
+                    row(entry, index: index, isOpen: openChildren.contains(entry.url))
                 }
             }
+            // The connector lines start at a row, so the model must know the scroll position.
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .named(Self.listSpace)).minY
+            } action: { offset in
+                model.setScrollOffset(card.id, offset)
+            }
         }
-        .frame(height: min(contentHeight, Self.maxListHeight))
+        .coordinateSpace(.named(Self.listSpace))
+        .frame(height: CardLayout.listHeight(entryCount: card.entries.count))
     }
 
-    private func row(_ entry: FileEntry, index: Int) -> some View {
-        let isSelected = selection == entry.id
-        return HStack(spacing: 8) {
+    private func row(_ entry: FileEntry, index: Int, isOpen: Bool) -> some View {
+        HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
                     .resizable()
@@ -122,32 +125,39 @@ struct FolderCardView: View {
         }
         .font(.system(size: 13))
         .padding(.horizontal, 10)
-        .frame(height: Self.rowHeight)
-        .background(rowBackground(isSelected: isSelected, index: index))
+        .frame(height: CardLayout.rowHeight)
+        .background(rowBackground(isHighlighted: isOpen || selection == entry.id, index: index))
         .contentShape(Rectangle())
         .onTapGesture { selection = entry.id }
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            guard entry.isDirectory else { return }
+            model.openChild(of: card.id, folder: entry.url)
+        })
     }
 
-    private func rowBackground(isSelected: Bool, index: Int) -> Color {
-        if isSelected { return Color.accentColor.opacity(0.2) }
+    private func rowBackground(isHighlighted: Bool, index: Int) -> Color {
+        if isHighlighted { return Color.accentColor.opacity(0.2) }
         return index.isMultiple(of: 2) ? .clear : Color.primary.opacity(0.035)
     }
 
     // MARK: - Dragging
 
+    /// Moves the card in the model while the drag continues, so that the connector lines follow it.
     private var moveGesture: some Gesture {
         DragGesture(coordinateSpace: .global)
-            // The translation is in screen points. Divide by the zoom to get canvas points.
-            .updating($dragOffset) { value, state, _ in
-                state = CGSize(width: value.translation.width / model.zoom, height: value.translation.height / model.zoom)
-            }
-            .onChanged { _ in model.bringToFront(card.id) }
-            .onEnded { value in
+            .onChanged { value in
+                let start = dragStart ?? card.position
+                if dragStart == nil {
+                    dragStart = start
+                    model.bringToFront(card.id)
+                }
+                // The translation is in screen points. Divide by the zoom to get canvas points.
                 model.move(card.id, to: CGPoint(
-                    x: card.position.x + value.translation.width / model.zoom,
-                    y: card.position.y + value.translation.height / model.zoom
+                    x: start.x + value.translation.width / model.zoom,
+                    y: start.y + value.translation.height / model.zoom
                 ))
             }
+            .onEnded { _ in dragStart = nil }
     }
 
     // MARK: - Formatting

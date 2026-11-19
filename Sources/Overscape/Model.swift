@@ -16,8 +16,50 @@ struct FolderCard: Identifiable {
     let url: URL
     var position: CGPoint
     var entries: [FileEntry]
+    /// The card that this card was opened from. Nil for a dropped folder.
+    var parentID: UUID? = nil
+    /// How far the file list is scrolled (0 or negative), in canvas points.
+    var scrollOffset: CGFloat = 0
 
     var title: String { url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
+    var height: CGFloat { CardLayout.height(entryCount: entries.count) }
+}
+
+/// Card sizes in canvas points. The card view and the model both use them.
+enum CardLayout {
+    static let width: CGFloat = 490
+    static let headerHeight: CGFloat = 32
+    static let columnHeaderHeight: CGFloat = 24
+    static let dividerHeight: CGFloat = 1
+    static let rowHeight: CGFloat = 27
+    static let maxListHeight: CGFloat = 640
+    /// Horizontal space between a card and the cards opened from it.
+    static let childSpacing: CGFloat = 60
+    /// Vertical space between cards opened from the same card.
+    static let siblingSpacing: CGFloat = 20
+
+    static var listTop: CGFloat { headerHeight + dividerHeight + columnHeaderHeight + dividerHeight }
+
+    static func listHeight(entryCount: Int) -> CGFloat {
+        min(CGFloat(max(entryCount, 1)) * rowHeight, maxListHeight)
+    }
+
+    static func height(entryCount: Int) -> CGFloat {
+        listTop + listHeight(entryCount: entryCount)
+    }
+
+    /// The vertical center of a row, from the top of the card.
+    /// When the row is scrolled out of view, the value stops at the top or bottom edge of the list.
+    static func rowCenterY(index: Int, entryCount: Int, scrollOffset: CGFloat) -> CGFloat {
+        let y = listTop + scrollOffset + (CGFloat(index) + 0.5) * rowHeight
+        return min(max(y, listTop), listTop + listHeight(entryCount: entryCount))
+    }
+}
+
+struct Connection: Identifiable {
+    let id: FolderCard.ID // The child card.
+    let start: CGPoint
+    let end: CGPoint
 }
 
 enum FolderLoader {
@@ -106,7 +148,66 @@ final class CanvasModel {
         cards.append(cards.remove(at: index))
     }
 
+    /// Opens a card for `folder` (a subfolder in the parent card) to the right of the parent.
+    /// A parent can have many child cards. Each new child goes below the ones that are already open.
+    func openChild(of parentID: FolderCard.ID, folder: URL) {
+        guard let parent = cards.first(where: { $0.id == parentID }),
+              let rowIndex = parent.entries.firstIndex(where: { $0.url == folder })
+        else { return }
+
+        if let existing = cards.first(where: { $0.parentID == parentID && $0.url == folder }) {
+            bringToFront(existing.id)
+            return
+        }
+
+        let rowY = CardLayout.rowCenterY(index: rowIndex, entryCount: parent.entries.count, scrollOffset: parent.scrollOffset)
+        var y = parent.position.y + rowY - CardLayout.headerHeight / 2
+        let siblingBottoms = cards.filter { $0.parentID == parentID }.map { $0.position.y + $0.height }
+        if let lowest = siblingBottoms.max() {
+            y = max(y, lowest + CardLayout.siblingSpacing)
+        }
+
+        cards.append(FolderCard(
+            url: folder,
+            position: CGPoint(x: parent.position.x + CardLayout.width + CardLayout.childSpacing, y: y),
+            entries: FolderLoader.entries(in: folder),
+            parentID: parentID
+        ))
+    }
+
+    func setScrollOffset(_ id: FolderCard.ID, _ offset: CGFloat) {
+        guard let index = cards.firstIndex(where: { $0.id == id }), cards[index].scrollOffset != offset else { return }
+        cards[index].scrollOffset = offset
+    }
+
+    /// Lines from a row in a parent card to the header of the child card, in canvas points.
+    var connections: [Connection] {
+        cards.compactMap { child in
+            guard let parent = cards.first(where: { $0.id == child.parentID }),
+                  let rowIndex = parent.entries.firstIndex(where: { $0.url == child.url })
+            else { return nil }
+            let rowY = CardLayout.rowCenterY(index: rowIndex, entryCount: parent.entries.count, scrollOffset: parent.scrollOffset)
+            return Connection(
+                id: child.id,
+                start: CGPoint(x: parent.position.x + CardLayout.width, y: parent.position.y + rowY),
+                end: CGPoint(x: child.position.x, y: child.position.y + CardLayout.headerHeight / 2)
+            )
+        }
+    }
+
+    /// Closes the card and all cards that were opened from it.
     func close(_ id: FolderCard.ID) {
-        cards.removeAll { $0.id == id }
+        var closing: Set<FolderCard.ID> = [id]
+        var found = true
+        while found {
+            found = false
+            for card in cards where !closing.contains(card.id) {
+                if let parentID = card.parentID, closing.contains(parentID) {
+                    closing.insert(card.id)
+                    found = true
+                }
+            }
+        }
+        cards.removeAll { closing.contains($0.id) }
     }
 }
