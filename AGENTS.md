@@ -26,12 +26,12 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 
 | File | Purpose |
 | --- | --- |
-| `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. |
-| `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasModel`. |
+| `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `CanvasModel`, restores it at the start and saves it when the app quits. |
+| `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `CanvasModel`. |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
 | `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll and drag events on the canvas. |
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, double-click, drag to move. |
-| `Tests/OverscapeTests/` | Tests for `FolderLoader` and `CanvasModel`. |
+| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel` and save and restore. |
 
 ## Architecture
 
@@ -51,6 +51,15 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - A trackpad pinch zooms from 25% to 300%. The point under the cursor stays in place. Pinch works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
 - A two-finger scroll, the mouse wheel, or a drag on empty canvas moves (pans) the canvas.
 - The dot grid moves and scales with the canvas. When the dots are too close together, they are hidden.
+
+### Save and restore
+
+- The app has one window, so there is one canvas.
+- When the app quits, it saves the open cards (root and child cards), their positions, and the zoom and pan. The file is `~/Library/Application Support/Overscape/canvas.json`.
+- At the start, the app restores the saved canvas. It reads the file lists from disk again.
+- If a saved folder does not exist, its card and all cards opened from it are not restored.
+- The app saves only on a normal quit. A crash or a force quit loses the changes since the last start.
+- The scroll offset of the file lists and the selected rows are not saved.
 
 ### Cards
 
@@ -74,7 +83,6 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - It is not decided if closing a card must also close its child cards. At the moment, it does.
 - When sibling cards move down, the cards opened from them do not move. Lines further down the tree can then cross.
 - Child card order uses the row order, not the current card positions. If you drag a child card out of order, a new card can overlap it.
-- Nothing is saved. When the app quits, all cards are lost.
 
 ## Conventions
 

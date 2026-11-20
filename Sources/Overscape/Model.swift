@@ -12,7 +12,7 @@ struct FileEntry: Identifiable, Hashable {
 }
 
 struct FolderCard: Identifiable {
-    let id = UUID()
+    var id = UUID()
     let url: URL
     var position: CGPoint
     var entries: [FileEntry]
@@ -91,6 +91,42 @@ enum FolderLoader {
     }
 }
 
+/// The saved state of the canvas: the open cards and the viewport.
+struct CanvasSnapshot: Codable, Equatable {
+    struct Card: Codable, Equatable {
+        let id: UUID
+        let path: String
+        let x: CGFloat
+        let y: CGFloat
+        let parentID: UUID?
+    }
+
+    var cards: [Card]
+    var zoom: CGFloat
+    var panX: CGFloat
+    var panY: CGFloat
+}
+
+/// Reads and writes the canvas snapshot as a JSON file.
+enum SnapshotStore {
+    static var defaultURL: URL {
+        URL.applicationSupportDirectory
+            .appendingPathComponent("Overscape", isDirectory: true)
+            .appendingPathComponent("canvas.json")
+    }
+
+    static func save(_ snapshot: CanvasSnapshot, to url: URL = defaultURL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(snapshot).write(to: url, options: .atomic)
+    }
+
+    /// Returns nil when there is no file or the file is not valid.
+    static func load(from url: URL = defaultURL) -> CanvasSnapshot? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(CanvasSnapshot.self, from: data)
+    }
+}
+
 @MainActor
 @Observable
 final class CanvasModel {
@@ -101,6 +137,45 @@ final class CanvasModel {
     var pan: CGSize = .zero
 
     static let zoomRange: ClosedRange<CGFloat> = 0.25...3
+
+    var snapshot: CanvasSnapshot {
+        CanvasSnapshot(
+            cards: cards.map { .init(id: $0.id, path: $0.url.path, x: $0.position.x, y: $0.position.y, parentID: $0.parentID) },
+            zoom: zoom,
+            panX: pan.width,
+            panY: pan.height
+        )
+    }
+
+    /// Replaces the canvas with the saved state. The file lists are read again from disk.
+    /// A card whose folder does not exist is not restored. The cards opened from it are also not restored.
+    func restore(_ snapshot: CanvasSnapshot) {
+        let saved = Dictionary(snapshot.cards.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var kept: [UUID: Bool] = [:]
+        func isKept(_ card: CanvasSnapshot.Card) -> Bool {
+            if let known = kept[card.id] { return known }
+            kept[card.id] = false // Stops a loop in a damaged file.
+            var result = FolderLoader.isDirectory(URL(fileURLWithPath: card.path))
+            if result, let parentID = card.parentID {
+                result = saved[parentID].map(isKept) ?? false
+            }
+            kept[card.id] = result
+            return result
+        }
+
+        cards = snapshot.cards.filter(isKept).map { card in
+            let url = URL(fileURLWithPath: card.path)
+            return FolderCard(
+                id: card.id,
+                url: url,
+                position: CGPoint(x: card.x, y: card.y),
+                entries: FolderLoader.entries(in: url),
+                parentID: card.parentID
+            )
+        }
+        zoom = min(max(snapshot.zoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        pan = CGSize(width: snapshot.panX, height: snapshot.panY)
+    }
 
     /// Changes the zoom by `factor` and keeps the canvas point under `anchor` (view coordinates) in place.
     func zoom(by factor: CGFloat, around anchor: CGPoint) {

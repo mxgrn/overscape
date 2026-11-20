@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CanvasView: View {
-    @State private var model = CanvasModel()
+    let model: CanvasModel
     @State private var isTargeted = false
 
     var body: some View {

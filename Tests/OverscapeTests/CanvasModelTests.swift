@@ -52,6 +52,41 @@ struct CanvasModelTests {
         #expect(model.cards.isEmpty)
     }
 
+    @Test func restoreBringsBackTheCardTreeAndTheViewport() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: CGPoint(x: 100, y: 50))
+        model.openChild(of: model.cards[0].id, folder: model.cards[0].entries[0].url)
+        model.zoom(by: 2, around: CGPoint(x: 10, y: 20))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try SnapshotStore.save(model.snapshot, to: file)
+
+        let restored = CanvasModel()
+        restored.restore(try #require(SnapshotStore.load(from: file)))
+
+        #expect(restored.snapshot == model.snapshot)
+        #expect(restored.connections.count == 1)
+    }
+
+    @Test func restoreSkipsAMissingFolderAndItsChildCards() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let other = try makeFolder(subfolders: ["b"])
+        defer { try? FileManager.default.removeItem(at: other) }
+        let model = CanvasModel()
+        model.addFolders([root, other], at: .zero)
+        model.openChild(of: model.cards[0].id, folder: model.cards[0].entries[0].url)
+        let snapshot = model.snapshot
+        try FileManager.default.removeItem(at: root)
+
+        let restored = CanvasModel()
+        restored.restore(snapshot)
+
+        #expect(restored.cards.map(\.id) == [model.cards[1].id])
+    }
+
     private func makeFolder(subfolders: [String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         for name in subfolders {
