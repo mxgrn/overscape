@@ -18,9 +18,14 @@ struct FolderCardView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            columnHeaders
-            Divider()
-            list
+            switch card.viewMode {
+            case .list:
+                columnHeaders
+                Divider()
+                list
+            case .icons:
+                grid
+            }
         }
         .frame(width: CardLayout.width)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -32,7 +37,10 @@ struct FolderCardView: View {
                     lineWidth: isHovered ? 2.5 : 1.5
                 )
         )
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            isHovered = hovering
+            model.setHovered(card.id, hovering)
+        }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .offset(x: card.position.x, y: card.position.y)
@@ -108,6 +116,74 @@ struct FolderCardView: View {
         }
         .coordinateSpace(.named(Self.listSpace))
         .frame(height: CardLayout.listHeight(entryCount: card.entries.count))
+    }
+
+    /// Icon mode. Icons with an open child card are not highlighted, only the selected icon.
+    private var grid: some View {
+        let columns = Array(
+            repeating: GridItem(.fixed(CardLayout.iconCellWidth), spacing: 0),
+            count: CardLayout.iconColumns
+        )
+        return ScrollView {
+            Group {
+                if card.entries.isEmpty {
+                    Text("Empty folder")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: CardLayout.iconCellHeight)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 0) {
+                        ForEach(card.entries) { entry in
+                            iconCell(entry)
+                        }
+                    }
+                }
+            }
+            .padding(CardLayout.gridPadding)
+            // The connector lines start at an icon, so the model must know the scroll position.
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .named(Self.listSpace)).minY
+            } action: { offset in
+                model.setScrollOffset(card.id, offset)
+            }
+        }
+        .coordinateSpace(.named(Self.listSpace))
+        .frame(height: CardLayout.gridHeight(entryCount: card.entries.count))
+    }
+
+    private func iconCell(_ entry: FileEntry) -> some View {
+        let isSelected = selection == entry.id
+        return VStack(spacing: 4) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
+                .resizable()
+                .frame(width: CardLayout.iconSize, height: CardLayout.iconSize)
+                .padding(3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isSelected ? Color.primary.opacity(0.1) : .clear)
+                )
+            Text(entry.name)
+                .font(.system(size: 12))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isSelected ? Color.accentColor : .clear)
+                )
+        }
+        .padding(.top, 4)
+        .frame(width: CardLayout.iconCellWidth, height: CardLayout.iconCellHeight, alignment: .top)
+        .contentShape(Rectangle())
+        .onTapGesture { selection = entry.id }
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            guard entry.isDirectory else { return }
+            model.openChild(of: card.id, folder: entry.url)
+        })
     }
 
     private func row(_ entry: FileEntry, index: Int, isOpen: Bool) -> some View {

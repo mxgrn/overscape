@@ -11,6 +11,12 @@ struct FileEntry: Identifiable, Hashable {
     var id: URL { url }
 }
 
+/// How a card shows its items, like the view modes in Finder.
+enum CardViewMode: String, Codable {
+    case list
+    case icons
+}
+
 struct FolderCard: Identifiable {
     var id = UUID()
     let url: URL
@@ -20,9 +26,14 @@ struct FolderCard: Identifiable {
     var parentID: UUID? = nil
     /// How far the file list is scrolled (0 or negative), in canvas points.
     var scrollOffset: CGFloat = 0
+    var viewMode: CardViewMode = .list
+
+    func itemCenterY(index: Int) -> CGFloat {
+        CardLayout.itemCenterY(index: index, entryCount: entries.count, mode: viewMode, scrollOffset: scrollOffset)
+    }
 
     var title: String { url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
-    var height: CGFloat { CardLayout.height(entryCount: entries.count) }
+    var height: CGFloat { CardLayout.height(entryCount: entries.count, mode: viewMode) }
 }
 
 /// Card sizes in canvas points. The card view and the model both use them.
@@ -38,21 +49,61 @@ enum CardLayout {
     /// Vertical space between cards opened from the same card.
     static let siblingSpacing: CGFloat = 20
 
+    /// Icon mode: the size of one icon, as in Finder.
+    static let iconSize: CGFloat = 64
+    static let iconColumns = 4
+    static let gridPadding: CGFloat = 10
+    /// Icon mode: the height of one cell (icon, space and a name of two lines).
+    static let iconCellHeight: CGFloat = 108
+    static var iconCellWidth: CGFloat { (width - 2 * gridPadding) / CGFloat(iconColumns) }
+
     static var listTop: CGFloat { headerHeight + dividerHeight + columnHeaderHeight + dividerHeight }
+
+    /// The top of the item area. Icon mode has no column headers.
+    static func contentTop(mode: CardViewMode) -> CGFloat {
+        switch mode {
+        case .list: listTop
+        case .icons: headerHeight + dividerHeight
+        }
+    }
 
     static func listHeight(entryCount: Int) -> CGFloat {
         min(CGFloat(max(entryCount, 1)) * rowHeight, maxListHeight)
     }
 
-    static func height(entryCount: Int) -> CGFloat {
-        listTop + listHeight(entryCount: entryCount)
+    static func iconRowCount(entryCount: Int) -> Int {
+        (max(entryCount, 1) + iconColumns - 1) / iconColumns
     }
 
-    /// The vertical center of a row, from the top of the card.
-    /// When the row is scrolled out of view, the value stops at the top or bottom edge of the list.
-    static func rowCenterY(index: Int, entryCount: Int, scrollOffset: CGFloat) -> CGFloat {
-        let y = listTop + scrollOffset + (CGFloat(index) + 0.5) * rowHeight
-        return min(max(y, listTop), listTop + listHeight(entryCount: entryCount))
+    static func gridHeight(entryCount: Int) -> CGFloat {
+        min(CGFloat(iconRowCount(entryCount: entryCount)) * iconCellHeight + 2 * gridPadding, maxListHeight)
+    }
+
+    /// The height of the item area. It scrolls when the items need more space.
+    static func contentHeight(entryCount: Int, mode: CardViewMode) -> CGFloat {
+        switch mode {
+        case .list: listHeight(entryCount: entryCount)
+        case .icons: gridHeight(entryCount: entryCount)
+        }
+    }
+
+    static func height(entryCount: Int, mode: CardViewMode = .list) -> CGFloat {
+        contentTop(mode: mode) + contentHeight(entryCount: entryCount, mode: mode)
+    }
+
+    /// The vertical center of an item (a row or an icon cell), from the top of the card.
+    /// When the item is scrolled out of view, the value stops at the top or bottom edge of the item area.
+    static func itemCenterY(index: Int, entryCount: Int, mode: CardViewMode, scrollOffset: CGFloat) -> CGFloat {
+        let top = contentTop(mode: mode)
+        let center: CGFloat
+        switch mode {
+        case .list:
+            center = (CGFloat(index) + 0.5) * rowHeight
+        case .icons:
+            center = gridPadding + (CGFloat(index / iconColumns) + 0.5) * iconCellHeight
+        }
+        let y = top + scrollOffset + center
+        return min(max(y, top), top + contentHeight(entryCount: entryCount, mode: mode))
     }
 }
 
@@ -99,6 +150,8 @@ struct CanvasSnapshot: Codable, Equatable {
         let x: CGFloat
         let y: CGFloat
         let parentID: UUID?
+        /// Nil in files from versions without view modes. Nil means list mode.
+        var viewMode: CardViewMode? = nil
     }
 
     var cards: [Card]
@@ -131,6 +184,8 @@ enum SnapshotStore {
 @Observable
 final class CanvasModel {
     var cards: [FolderCard] = []
+    /// The card under the cursor. Keyboard commands for a card go to this card.
+    private(set) var hoveredCardID: FolderCard.ID?
 
     /// Viewport: a canvas point `p` shows at `p * zoom + pan` in the view.
     var zoom: CGFloat = 1
@@ -140,7 +195,9 @@ final class CanvasModel {
 
     var snapshot: CanvasSnapshot {
         CanvasSnapshot(
-            cards: cards.map { .init(id: $0.id, path: $0.url.path, x: $0.position.x, y: $0.position.y, parentID: $0.parentID) },
+            cards: cards.map {
+                .init(id: $0.id, path: $0.url.path, x: $0.position.x, y: $0.position.y, parentID: $0.parentID, viewMode: $0.viewMode)
+            },
             zoom: zoom,
             panX: pan.width,
             panY: pan.height
@@ -170,7 +227,8 @@ final class CanvasModel {
                 url: url,
                 position: CGPoint(x: card.x, y: card.y),
                 entries: FolderLoader.entries(in: url),
-                parentID: card.parentID
+                parentID: card.parentID,
+                viewMode: card.viewMode ?? .list
             )
         }
         zoom = min(max(snapshot.zoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
@@ -250,7 +308,7 @@ final class CanvasModel {
         let below = siblings.filter { $0.index > rowIndex }.map(\.card)
 
         // Start level with the clicked row, then stay between the sibling above and the sibling below.
-        let rowY = CardLayout.rowCenterY(index: rowIndex, entryCount: parent.entries.count, scrollOffset: parent.scrollOffset)
+        let rowY = parent.itemCenterY(index: rowIndex)
         var y = parent.position.y + rowY - CardLayout.headerHeight / 2
         if let first = below.first {
             y = min(y, first.position.y - height - spacing)
@@ -282,13 +340,32 @@ final class CanvasModel {
         cards[index].scrollOffset = offset
     }
 
+    func setHovered(_ id: FolderCard.ID, _ isHovered: Bool) {
+        if isHovered {
+            hoveredCardID = id
+        } else if hoveredCardID == id {
+            hoveredCardID = nil
+        }
+    }
+
+    /// Sets the view mode of the card under the cursor. Returns false when there is no card under the cursor.
+    @discardableResult
+    func setViewModeOfHoveredCard(_ mode: CardViewMode) -> Bool {
+        guard let index = cards.firstIndex(where: { $0.id == hoveredCardID }) else { return false }
+        if cards[index].viewMode != mode {
+            cards[index].viewMode = mode
+            cards[index].scrollOffset = 0 // The new item area starts at the top.
+        }
+        return true
+    }
+
     /// Lines from a row in a parent card to the header of the child card, in canvas points.
     var connections: [Connection] {
         cards.compactMap { child in
             guard let parent = cards.first(where: { $0.id == child.parentID }),
                   let rowIndex = parent.entries.firstIndex(where: { $0.url == child.url })
             else { return nil }
-            let rowY = CardLayout.rowCenterY(index: rowIndex, entryCount: parent.entries.count, scrollOffset: parent.scrollOffset)
+            let rowY = parent.itemCenterY(index: rowIndex)
             return Connection(
                 id: child.id,
                 start: CGPoint(x: parent.position.x + CardLayout.width, y: parent.position.y + rowY),
@@ -311,5 +388,8 @@ final class CanvasModel {
             }
         }
         cards.removeAll { closing.contains($0.id) }
+        if let hoveredCardID, closing.contains(hoveredCardID) {
+            self.hoveredCardID = nil
+        }
     }
 }

@@ -4,28 +4,35 @@ import SwiftUI
 /// An AppKit view behind the cards that turns raw input into canvas navigation:
 /// - pinch anywhere in the canvas zooms around the cursor,
 /// - a mouse drag on empty canvas pans,
-/// - a cursor move with the Control key pans anywhere in the canvas.
+/// - a cursor move with the Control key pans anywhere in the canvas,
+/// - Command-1 and Command-2 set the view mode of the card under the cursor.
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     var onMagnify: (_ factor: CGFloat, _ location: CGPoint) -> Void
+    /// Returns false when the key had no effect. The event then continues.
+    var onViewMode: (CardViewMode) -> Bool
 
     func makeNSView(context: Context) -> EventNSView {
         let view = EventNSView()
         view.onPan = onPan
         view.onMagnify = onMagnify
+        view.onViewMode = onViewMode
         return view
     }
 
     func updateNSView(_ view: EventNSView, context: Context) {
         view.onPan = onPan
         view.onMagnify = onMagnify
+        view.onViewMode = onViewMode
     }
 
     final class EventNSView: NSView {
         var onPan: (CGSize) -> Void = { _ in }
         var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
+        var onViewMode: (CardViewMode) -> Bool = { _ in false }
         private var magnifyMonitor: Any?
         private var moveMonitor: Any?
+        private var keyMonitor: Any?
 
         override var isFlipped: Bool { true }
 
@@ -53,6 +60,19 @@ struct CanvasEventView: NSViewRepresentable {
                 self.onPan(CGSize(width: event.deltaX, height: event.deltaY))
                 return event
             }
+            // The same keys as the view modes in Finder.
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, event.window === self.window,
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+                else { return event }
+                let mode: CardViewMode
+                switch event.charactersIgnoringModifiers {
+                case "1": mode = .icons
+                case "2": mode = .list
+                default: return event
+                }
+                return self.onViewMode(mode) ? nil : event
+            }
         }
 
         override func removeFromSuperview() {
@@ -65,6 +85,8 @@ struct CanvasEventView: NSViewRepresentable {
             magnifyMonitor = nil
             if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
             moveMonitor = nil
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+            keyMonitor = nil
         }
 
         override func mouseDragged(with event: NSEvent) {

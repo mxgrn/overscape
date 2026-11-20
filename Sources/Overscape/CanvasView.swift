@@ -10,7 +10,8 @@ struct CanvasView: View {
 
             CanvasEventView(
                 onPan: { model.pan(by: $0) },
-                onMagnify: { model.zoom(by: $0, around: $1) }
+                onMagnify: { model.zoom(by: $0, around: $1) },
+                onViewMode: { model.setViewModeOfHoveredCard($0) }
             )
 
             ZStack(alignment: .topLeading) {

@@ -59,6 +59,8 @@ struct CanvasModelTests {
         model.addFolders([root], at: CGPoint(x: 100, y: 50))
         model.openChild(of: model.cards[0].id, folder: model.cards[0].entries[0].url)
         model.zoom(by: 2, around: CGPoint(x: 10, y: 20))
+        model.setHovered(model.cards[0].id, true)
+        model.setViewModeOfHoveredCard(.icons)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         try SnapshotStore.save(model.snapshot, to: file)
@@ -68,6 +70,57 @@ struct CanvasModelTests {
 
         #expect(restored.snapshot == model.snapshot)
         #expect(restored.connections.count == 1)
+        #expect(restored.cards[0].viewMode == .icons)
+    }
+
+    @Test func aSnapshotWithoutViewModesRestoresListMode() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let json = """
+            {"cards":[{"id":"\(UUID().uuidString)","path":"\(root.path)","x":0,"y":0}],"zoom":1,"panX":0,"panY":0}
+            """
+        let snapshot = try JSONDecoder().decode(CanvasSnapshot.self, from: Data(json.utf8))
+
+        let model = CanvasModel()
+        model.restore(snapshot)
+
+        #expect(model.cards.map(\.viewMode) == [.list])
+    }
+
+    @Test func viewModeKeysChangeOnlyTheHoveredCard() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root, root], at: .zero)
+
+        #expect(!model.setViewModeOfHoveredCard(.icons))
+
+        model.setHovered(model.cards[1].id, true)
+        #expect(model.setViewModeOfHoveredCard(.icons))
+        #expect(model.cards.map(\.viewMode) == [.list, .icons])
+        #expect(model.cards[1].height == CardLayout.height(entryCount: 1, mode: .icons))
+
+        model.setViewModeOfHoveredCard(.list)
+        #expect(model.cards[1].viewMode == .list)
+
+        model.setHovered(model.cards[1].id, false)
+        #expect(!model.setViewModeOfHoveredCard(.icons))
+    }
+
+    @Test func inIconModeTheLineStartsLevelWithTheIcon() throws {
+        let root = try makeFolder(subfolders: ["a", "b", "c", "d", "e"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: CGPoint(x: 100, y: 50))
+        let parent = model.cards[0]
+        model.setHovered(parent.id, true)
+        model.setViewModeOfHoveredCard(.icons)
+
+        // With 4 icons on each grid line, the fifth item is on the second line.
+        model.openChild(of: parent.id, folder: parent.entries[4].url)
+
+        let expectedY = 50 + CardLayout.contentTop(mode: .icons) + CardLayout.gridPadding + 1.5 * CardLayout.iconCellHeight
+        #expect(model.connections.map(\.start.y) == [expectedY])
     }
 
     @Test func restoreSkipsAMissingFolderAndItsChildCards() throws {
