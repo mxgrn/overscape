@@ -6,6 +6,8 @@ struct FolderCardView: View {
     let model: CanvasModel
 
     @State private var dragStart: CGPoint?
+    /// The card frame at the start of a resize.
+    @State private var resizeStart: CGRect?
     @State private var selection: FileEntry.ID?
     /// True while the mouse is on the card. The card then shows a stronger border.
     @State private var isHovered = false
@@ -27,7 +29,7 @@ struct FolderCardView: View {
                 grid
             }
         }
-        .frame(width: CardLayout.width)
+        .frame(width: card.width)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -43,6 +45,7 @@ struct FolderCardView: View {
         }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .overlay { resizeHandles }
         .offset(x: card.position.x, y: card.position.y)
     }
 
@@ -115,14 +118,14 @@ struct FolderCardView: View {
             }
         }
         .coordinateSpace(.named(Self.listSpace))
-        .frame(height: CardLayout.listHeight(entryCount: card.entries.count))
+        .frame(height: card.contentHeight, alignment: .top)
     }
 
     /// Icon mode. Icons with an open child card are not highlighted, only the selected icon.
     private var grid: some View {
         let columns = Array(
-            repeating: GridItem(.fixed(CardLayout.iconCellWidth), spacing: 0),
-            count: CardLayout.iconColumns
+            repeating: GridItem(.fixed(CardLayout.iconCellWidth(width: card.width)), spacing: 0),
+            count: card.iconColumns
         )
         return ScrollView {
             Group {
@@ -149,7 +152,7 @@ struct FolderCardView: View {
             }
         }
         .coordinateSpace(.named(Self.listSpace))
-        .frame(height: CardLayout.gridHeight(entryCount: card.entries.count))
+        .frame(height: card.contentHeight, alignment: .top)
     }
 
     private func iconCell(_ entry: FileEntry) -> some View {
@@ -177,7 +180,7 @@ struct FolderCardView: View {
                 )
         }
         .padding(.top, 4)
-        .frame(width: CardLayout.iconCellWidth, height: CardLayout.iconCellHeight, alignment: .top)
+        .frame(width: CardLayout.iconCellWidth(width: card.width), height: CardLayout.iconCellHeight, alignment: .top)
         .contentShape(Rectangle())
         .onTapGesture { selection = entry.id }
         .simultaneousGesture(TapGesture(count: 2).onEnded {
@@ -243,6 +246,53 @@ struct FolderCardView: View {
             .onEnded { _ in dragStart = nil }
     }
 
+    // MARK: - Resizing
+
+    /// The 4 edges first, then the 4 corners, so that the corners are on top.
+    private static let handleEdges: [CardEdges] = [
+        .left, .right, .top, .bottom,
+        [.top, .left], [.top, .right], [.bottom, .left], [.bottom, .right],
+    ]
+
+    private var resizeHandles: some View {
+        ZStack {
+            ForEach(Self.handleEdges, id: \.rawValue) { edges in
+                resizeHandle(edges)
+            }
+        }
+    }
+
+    /// A handle is half inside and half outside the card.
+    private func resizeHandle(_ edges: CardEdges) -> some View {
+        let onX = !edges.isDisjoint(with: [.left, .right])
+        let onY = !edges.isDisjoint(with: [.top, .bottom])
+        let size = onX && onY ? CardLayout.resizeCornerSize : CardLayout.resizeEdgeThickness
+        let alignment = Alignment(
+            horizontal: edges.contains(.left) ? .leading : edges.contains(.right) ? .trailing : .center,
+            vertical: edges.contains(.top) ? .top : edges.contains(.bottom) ? .bottom : .center
+        )
+        return ResizeHandle(edges: edges) { translation in
+            let start = resizeStart ?? card.frame
+            if resizeStart == nil {
+                resizeStart = start
+                model.bringToFront(card.id)
+            }
+            // The translation is in screen points. Divide by the zoom to get canvas points.
+            model.resize(card.id, edges: edges, from: start, by: CGSize(
+                width: translation.width / model.zoom,
+                height: translation.height / model.zoom
+            ))
+        } onEnded: {
+            resizeStart = nil
+        }
+        .frame(width: onX ? size : nil, height: onY ? size : nil)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+        .offset(
+            x: edges.contains(.left) ? -size / 2 : edges.contains(.right) ? size / 2 : 0,
+            y: edges.contains(.top) ? -size / 2 : edges.contains(.bottom) ? size / 2 : 0
+        )
+    }
+
     // MARK: - Formatting
 
     private static let dateFormatter: DateFormatter = {
@@ -258,5 +308,74 @@ struct FolderCardView: View {
     static func format(size: Int64?) -> String {
         guard let size else { return "--" }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+}
+
+/// An invisible area on an edge or a corner of a card. A drag on it resizes the card.
+/// It shows a resize cursor while the mouse is on it and during the drag.
+private struct ResizeHandle: View {
+    let edges: CardEdges
+    let onChanged: (CGSize) -> Void
+    let onEnded: () -> Void
+
+    @State private var isHovered = false
+    @State private var isDragging = false
+    @State private var isCursorPushed = false
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isHovered = hovering
+                updateCursor()
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        isDragging = true
+                        updateCursor()
+                        onChanged(value.translation)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        updateCursor()
+                        onEnded()
+                    }
+            )
+            .onDisappear {
+                if isCursorPushed { NSCursor.pop() }
+                isCursorPushed = false
+            }
+    }
+
+    private func updateCursor() {
+        let wanted = isHovered || isDragging
+        if wanted, !isCursorPushed {
+            cursor.push()
+            isCursorPushed = true
+        } else if !wanted, isCursorPushed {
+            NSCursor.pop()
+            isCursorPushed = false
+        }
+    }
+
+    private var cursor: NSCursor {
+        if #available(macOS 15, *) {
+            let position: NSCursor.FrameResizePosition = switch edges {
+            case .left: .left
+            case .right: .right
+            case .top: .top
+            case .bottom: .bottom
+            case [.top, .left]: .topLeft
+            case [.top, .right]: .topRight
+            case [.bottom, .left]: .bottomLeft
+            default: .bottomRight
+            }
+            return .frameResize(position: position, directions: .all)
+        }
+        // macOS 14 has no public cursor for a diagonal resize.
+        if edges == .left || edges == .right { return .resizeLeftRight }
+        if edges == .top || edges == .bottom { return .resizeUpDown }
+        return .crosshair
     }
 }

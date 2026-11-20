@@ -27,35 +27,72 @@ struct FolderCard: Identifiable {
     /// How far the file list is scrolled (0 or negative), in canvas points.
     var scrollOffset: CGFloat = 0
     var viewMode: CardViewMode = .list
+    var width: CGFloat = CardLayout.defaultWidth
+    /// Nil means that the height comes from the content. When the user resizes the card
+    /// vertically, the card gets a fixed height.
+    var fixedHeight: CGFloat? = nil
 
     func itemCenterY(index: Int) -> CGFloat {
-        CardLayout.itemCenterY(index: index, entryCount: entries.count, mode: viewMode, scrollOffset: scrollOffset)
+        CardLayout.itemCenterY(
+            index: index, mode: viewMode, iconColumns: iconColumns,
+            contentHeight: contentHeight, scrollOffset: scrollOffset
+        )
     }
 
     var title: String { url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
-    var height: CGFloat { CardLayout.height(entryCount: entries.count, mode: viewMode) }
+    var iconColumns: Int { CardLayout.iconColumns(width: width) }
+    var height: CGFloat { fixedHeight ?? CardLayout.height(entryCount: entries.count, mode: viewMode, width: width) }
+    /// The height of the item area (the list or the icon grid).
+    var contentHeight: CGFloat { height - CardLayout.contentTop(mode: viewMode) }
+    var frame: CGRect { CGRect(origin: position, size: CGSize(width: width, height: height)) }
+}
+
+/// The edges of a card that a resize moves. A corner is two edges.
+struct CardEdges: OptionSet, Hashable {
+    let rawValue: Int
+
+    static let left = CardEdges(rawValue: 1 << 0)
+    static let top = CardEdges(rawValue: 1 << 1)
+    static let right = CardEdges(rawValue: 1 << 2)
+    static let bottom = CardEdges(rawValue: 1 << 3)
 }
 
 /// Card sizes in canvas points. The card view and the model both use them.
 enum CardLayout {
-    static let width: CGFloat = 490
+    static let defaultWidth: CGFloat = 490
+    static let minWidth: CGFloat = 320
     static let headerHeight: CGFloat = 32
     static let columnHeaderHeight: CGFloat = 24
     static let dividerHeight: CGFloat = 1
     static let rowHeight: CGFloat = 27
+    /// The maximum height of the item area when the height comes from the content.
     static let maxListHeight: CGFloat = 640
+    /// The minimum card height: the header, the column headers and one row.
+    static var minHeight: CGFloat { listTop + rowHeight }
     /// Horizontal space between a card and the cards opened from it.
     static let childSpacing: CGFloat = 60
     /// Vertical space between cards opened from the same card.
     static let siblingSpacing: CGFloat = 20
+    /// The thickness of the area along an edge that resizes the card.
+    static let resizeEdgeThickness: CGFloat = 8
+    /// The size of the area at a corner that resizes the card.
+    static let resizeCornerSize: CGFloat = 16
 
     /// Icon mode: the size of one icon, as in Finder.
     static let iconSize: CGFloat = 64
-    static let iconColumns = 4
+    /// Icon mode: the minimum width of one cell. The card width sets the number of columns.
+    static let iconMinCellWidth: CGFloat = 110
     static let gridPadding: CGFloat = 10
     /// Icon mode: the height of one cell (icon, space and a name of two lines).
     static let iconCellHeight: CGFloat = 108
-    static var iconCellWidth: CGFloat { (width - 2 * gridPadding) / CGFloat(iconColumns) }
+
+    static func iconColumns(width: CGFloat) -> Int {
+        max(1, Int((width - 2 * gridPadding) / iconMinCellWidth))
+    }
+
+    static func iconCellWidth(width: CGFloat) -> CGFloat {
+        (width - 2 * gridPadding) / CGFloat(iconColumns(width: width))
+    }
 
     static var listTop: CGFloat { headerHeight + dividerHeight + columnHeaderHeight + dividerHeight }
 
@@ -71,29 +108,34 @@ enum CardLayout {
         min(CGFloat(max(entryCount, 1)) * rowHeight, maxListHeight)
     }
 
-    static func iconRowCount(entryCount: Int) -> Int {
-        (max(entryCount, 1) + iconColumns - 1) / iconColumns
+    static func iconRowCount(entryCount: Int, columns: Int) -> Int {
+        (max(entryCount, 1) + columns - 1) / columns
     }
 
-    static func gridHeight(entryCount: Int) -> CGFloat {
-        min(CGFloat(iconRowCount(entryCount: entryCount)) * iconCellHeight + 2 * gridPadding, maxListHeight)
+    static func gridHeight(entryCount: Int, width: CGFloat) -> CGFloat {
+        let rows = iconRowCount(entryCount: entryCount, columns: iconColumns(width: width))
+        return min(CGFloat(rows) * iconCellHeight + 2 * gridPadding, maxListHeight)
     }
 
-    /// The height of the item area. It scrolls when the items need more space.
-    static func contentHeight(entryCount: Int, mode: CardViewMode) -> CGFloat {
+    /// The height of the item area when the height comes from the content.
+    /// The item area scrolls when the items need more space.
+    static func contentHeight(entryCount: Int, mode: CardViewMode, width: CGFloat) -> CGFloat {
         switch mode {
         case .list: listHeight(entryCount: entryCount)
-        case .icons: gridHeight(entryCount: entryCount)
+        case .icons: gridHeight(entryCount: entryCount, width: width)
         }
     }
 
-    static func height(entryCount: Int, mode: CardViewMode = .list) -> CGFloat {
-        contentTop(mode: mode) + contentHeight(entryCount: entryCount, mode: mode)
+    /// The card height when the height comes from the content.
+    static func height(entryCount: Int, mode: CardViewMode = .list, width: CGFloat = defaultWidth) -> CGFloat {
+        contentTop(mode: mode) + contentHeight(entryCount: entryCount, mode: mode, width: width)
     }
 
     /// The vertical center of an item (a row or an icon cell), from the top of the card.
     /// When the item is scrolled out of view, the value stops at the top or bottom edge of the item area.
-    static func itemCenterY(index: Int, entryCount: Int, mode: CardViewMode, scrollOffset: CGFloat) -> CGFloat {
+    static func itemCenterY(
+        index: Int, mode: CardViewMode, iconColumns: Int, contentHeight: CGFloat, scrollOffset: CGFloat
+    ) -> CGFloat {
         let top = contentTop(mode: mode)
         let center: CGFloat
         switch mode {
@@ -103,7 +145,7 @@ enum CardLayout {
             center = gridPadding + (CGFloat(index / iconColumns) + 0.5) * iconCellHeight
         }
         let y = top + scrollOffset + center
-        return min(max(y, top), top + contentHeight(entryCount: entryCount, mode: mode))
+        return min(max(y, top), top + contentHeight)
     }
 }
 
@@ -152,6 +194,10 @@ struct CanvasSnapshot: Codable, Equatable {
         let parentID: UUID?
         /// Nil in files from versions without view modes. Nil means list mode.
         var viewMode: CardViewMode? = nil
+        /// Nil in files from versions without resize. Nil means the default width.
+        var width: CGFloat? = nil
+        /// Nil means that the height comes from the content.
+        var height: CGFloat? = nil
     }
 
     var cards: [Card]
@@ -196,7 +242,10 @@ final class CanvasModel {
     var snapshot: CanvasSnapshot {
         CanvasSnapshot(
             cards: cards.map {
-                .init(id: $0.id, path: $0.url.path, x: $0.position.x, y: $0.position.y, parentID: $0.parentID, viewMode: $0.viewMode)
+                .init(
+                    id: $0.id, path: $0.url.path, x: $0.position.x, y: $0.position.y, parentID: $0.parentID,
+                    viewMode: $0.viewMode, width: $0.width, height: $0.fixedHeight
+                )
             },
             zoom: zoom,
             panX: pan.width,
@@ -228,7 +277,9 @@ final class CanvasModel {
                 position: CGPoint(x: card.x, y: card.y),
                 entries: FolderLoader.entries(in: url),
                 parentID: card.parentID,
-                viewMode: card.viewMode ?? .list
+                viewMode: card.viewMode ?? .list,
+                width: max(card.width ?? CardLayout.defaultWidth, CardLayout.minWidth),
+                fixedHeight: card.height.map { max($0, CardLayout.minHeight) }
             )
         }
         zoom = min(max(snapshot.zoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
@@ -273,6 +324,34 @@ final class CanvasModel {
     func move(_ id: FolderCard.ID, to position: CGPoint) {
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
         cards[index].position = position
+    }
+
+    /// Changes the card frame while the user drags the `edges` of the card by `translation` (canvas points).
+    /// `start` is the card frame at the start of the drag. The opposite edges stay in place.
+    /// The card does not become smaller than the minimum size.
+    /// When the top or the bottom edge moves, the card gets a fixed height.
+    func resize(_ id: FolderCard.ID, edges: CardEdges, from start: CGRect, by translation: CGSize) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        var frame = start
+        if edges.contains(.left) {
+            frame.origin.x = min(start.minX + translation.width, start.maxX - CardLayout.minWidth)
+            frame.size.width = start.maxX - frame.minX
+        }
+        if edges.contains(.right) {
+            frame.size.width = max(start.width + translation.width, CardLayout.minWidth)
+        }
+        if edges.contains(.top) {
+            frame.origin.y = min(start.minY + translation.height, start.maxY - CardLayout.minHeight)
+            frame.size.height = start.maxY - frame.minY
+        }
+        if edges.contains(.bottom) {
+            frame.size.height = max(start.height + translation.height, CardLayout.minHeight)
+        }
+        cards[index].position = frame.origin
+        cards[index].width = frame.width
+        if !edges.isDisjoint(with: [.top, .bottom]) {
+            cards[index].fixedHeight = frame.height
+        }
     }
 
     /// Moves the card to the end of the list, so that it draws on top.
@@ -329,7 +408,7 @@ final class CanvasModel {
 
         cards.append(FolderCard(
             url: folder,
-            position: CGPoint(x: parent.position.x + CardLayout.width + CardLayout.childSpacing, y: y),
+            position: CGPoint(x: parent.position.x + parent.width + CardLayout.childSpacing, y: y),
             entries: entries,
             parentID: parentID
         ))
@@ -368,7 +447,7 @@ final class CanvasModel {
             let rowY = parent.itemCenterY(index: rowIndex)
             return Connection(
                 id: child.id,
-                start: CGPoint(x: parent.position.x + CardLayout.width, y: parent.position.y + rowY),
+                start: CGPoint(x: parent.position.x + parent.width, y: parent.position.y + rowY),
                 end: CGPoint(x: child.position.x, y: child.position.y + CardLayout.headerHeight / 2)
             )
         }

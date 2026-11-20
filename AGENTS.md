@@ -57,12 +57,13 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 ### Save and restore
 
 - The app has one window, so there is one canvas.
-- When the app quits, it saves the open cards (root and child cards), their positions, their view modes, and the zoom and pan. The file is `~/Library/Application Support/Overscape/canvas.json`.
+- When the app quits, it saves the open cards (root and child cards), their positions, their sizes, their view modes, and the zoom and pan. The file is `~/Library/Application Support/Overscape/canvas.json`.
 - At the start, the app restores the saved canvas. It reads the file lists from disk again.
 - If a saved folder does not exist, its card and all cards opened from it are not restored.
 - The app saves only on a normal quit. A crash or a force quit loses the changes since the last start.
 - The scroll offset of the file lists and the selected rows are not saved.
 - A saved file from a version without view modes restores all cards in list mode.
+- A saved file from a version without resize restores all cards with the default width and the height from the content.
 
 ### Cards
 
@@ -73,11 +74,20 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - When the mouse is on a card, the card border becomes thicker and uses the full accent color.
 - The list scrolls when it is taller than `CardLayout.maxListHeight`.
 
+### Resize
+
+- Drag any of the 4 edges or the 4 corners of a card to resize it. The opposite edges stay in place. The cursor changes to a resize cursor on the edges and corners. On macOS 14, the corners show a crosshair cursor, because macOS 14 has no public diagonal resize cursor.
+- The resize area is half inside and half outside the card border.
+- A card cannot become smaller than `CardLayout.minWidth` and `CardLayout.minHeight`.
+- At the start, the height of a card comes from its content. When you move the top or the bottom edge, the card gets a fixed height. If the content is shorter, the card shows empty space. If the content is taller, the list scrolls. A change of the width only keeps the height from the content.
+- In icon mode, the number of icons on each line changes with the card width. Each cell is at least `CardLayout.iconMinCellWidth` wide.
+- A resize does not move the child cards.
+
 ### View modes
 
 - A card has two view modes, as in Finder: list (the default) and icons.
 - Command-1 sets icon mode and Command-2 sets list mode for the card under the cursor. The model knows this card (`hoveredCardID`). If no card is under the cursor, the keys do nothing. A local `NSEvent` monitor catches the keys.
-- Icon mode shows a grid of 64-point icons with the names below, 4 icons on each line. It has no column headers. The card keeps its width. The grid scrolls when it is taller than `CardLayout.maxListHeight`.
+- Icon mode shows a grid of 64-point icons with the names below. With the default width, there are 4 icons on each line. It has no column headers. The card keeps its width. The grid scrolls when it is taller than `CardLayout.maxListHeight`.
 - In icon mode, a single click selects an icon and a double-click on a folder opens a child card. Icons that have an open child card are not highlighted.
 - In icon mode, the connector line starts at the right edge of the card, level with the line of icons.
 
@@ -93,7 +103,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 
 - A scroll on top of a card moves the file list in that card, not the canvas. The wanted behavior is not decided yet.
 - It is not decided if closing a card must also close its child cards. At the moment, it does.
-- When a card changes its view mode, its height changes. Its child cards do not move, so they can overlap or the lines can cross.
+- When a card changes its view mode, its height changes (if it has no fixed height). A resize also changes the height. Its child cards do not move, so they can overlap or the lines can cross.
 - When sibling cards move down, the cards opened from them do not move. Lines further down the tree can then cross.
 - Child card order uses the row order, not the current card positions. If you drag a child card out of order, a new card can overlap it.
 

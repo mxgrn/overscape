@@ -33,7 +33,7 @@ struct CanvasModelTests {
 
         #expect(model.cards.count == 4)
         let children = try rows.map { row in try #require(model.cards.first { $0.url == row }) }
-        #expect(children.allSatisfy { $0.position.x == 100 + CardLayout.width + CardLayout.childSpacing })
+        #expect(children.allSatisfy { $0.position.x == 100 + CardLayout.defaultWidth + CardLayout.childSpacing })
         for (upper, lower) in zip(children, children.dropFirst()) {
             #expect(upper.position.y + upper.height + CardLayout.siblingSpacing <= lower.position.y)
         }
@@ -61,6 +61,7 @@ struct CanvasModelTests {
         model.zoom(by: 2, around: CGPoint(x: 10, y: 20))
         model.setHovered(model.cards[0].id, true)
         model.setViewModeOfHoveredCard(.icons)
+        model.resize(model.cards[1].id, edges: .bottom, from: model.cards[1].frame, by: CGSize(width: 0, height: 200))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         try SnapshotStore.save(model.snapshot, to: file)
@@ -71,6 +72,7 @@ struct CanvasModelTests {
         #expect(restored.snapshot == model.snapshot)
         #expect(restored.connections.count == 1)
         #expect(restored.cards[0].viewMode == .icons)
+        #expect(restored.cards[1].frame == model.cards[1].frame)
     }
 
     @Test func aSnapshotWithoutViewModesRestoresListMode() throws {
@@ -85,6 +87,70 @@ struct CanvasModelTests {
         model.restore(snapshot)
 
         #expect(model.cards.map(\.viewMode) == [.list])
+        #expect(model.cards[0].width == CardLayout.defaultWidth)
+        #expect(model.cards[0].fixedHeight == nil)
+    }
+
+    @Test func aCornerResizeMovesTwoEdgesAndKeepsTheOppositeEdges() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: CGPoint(x: 100, y: 100))
+        let start = model.cards[0].frame
+
+        model.resize(model.cards[0].id, edges: [.top, .left], from: start, by: CGSize(width: -50, height: -300))
+
+        #expect(model.cards[0].frame == CGRect(
+            x: start.minX - 50, y: start.minY - 300, width: start.width + 50, height: start.height + 300
+        ))
+    }
+
+    @Test func aResizeStopsAtTheMinimumSize() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let start = model.cards[0].frame
+
+        model.resize(model.cards[0].id, edges: [.top, .left], from: start, by: CGSize(width: 1000, height: 1000))
+
+        #expect(model.cards[0].frame == CGRect(
+            x: start.maxX - CardLayout.minWidth, y: start.maxY - CardLayout.minHeight,
+            width: CardLayout.minWidth, height: CardLayout.minHeight
+        ))
+    }
+
+    @Test func aWidthResizeKeepsTheHeightFromTheContent() throws {
+        let root = try makeFolder(subfolders: ["a", "b", "c", "d", "e"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        model.setHovered(model.cards[0].id, true)
+        model.setViewModeOfHoveredCard(.icons)
+        #expect(model.cards[0].iconColumns == 4)
+
+        // 5 icons on one grid line need 5 cells of the minimum width.
+        let width = 5 * CardLayout.iconMinCellWidth + 2 * CardLayout.gridPadding
+        model.resize(model.cards[0].id, edges: .right, from: model.cards[0].frame,
+                     by: CGSize(width: width - CardLayout.defaultWidth, height: 0))
+
+        #expect(model.cards[0].iconColumns == 5)
+        #expect(model.cards[0].fixedHeight == nil)
+        #expect(model.cards[0].height == CardLayout.height(entryCount: 5, mode: .icons, width: width))
+    }
+
+    @Test func aChildCardOpensToTheRightOfAResizedParent() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let parent = model.cards[0]
+        model.resize(parent.id, edges: .right, from: parent.frame, by: CGSize(width: 100, height: 0))
+
+        model.openChild(of: parent.id, folder: parent.entries[0].url)
+
+        #expect(model.cards[1].position.x == model.cards[0].width + CardLayout.childSpacing)
+        #expect(model.connections.map(\.start.x) == [model.cards[0].width])
     }
 
     @Test func viewModeKeysChangeOnlyTheHoveredCard() throws {
