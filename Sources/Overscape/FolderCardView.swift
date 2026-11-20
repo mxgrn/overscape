@@ -7,6 +7,8 @@ struct FolderCardView: View {
 
     @State private var dragStart: CGPoint?
     @State private var selection: FileEntry.ID?
+    /// True while the mouse is on the card. The card then shows a stronger border.
+    @State private var isHovered = false
 
     private static let sizeColumn: CGFloat = 70
     private static let dateColumn: CGFloat = 120
@@ -25,8 +27,13 @@ struct FolderCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1.5)
+                .strokeBorder(
+                    Color.accentColor.opacity(isHovered ? 1 : 0.5),
+                    lineWidth: isHovered ? 2.5 : 1.5
+                )
         )
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .offset(x: card.position.x, y: card.position.y)
     }

@@ -67,6 +67,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - The columns are Name, Size and Date Modified. Dates use the format `dd.MM.yy, HH:mm`. Folders show `--` as the size.
 - Items are sorted newest first. Hidden files are not shown.
 - A single click selects a row. Rows that have an open child card stay highlighted.
+- When the mouse is on a card, the card border becomes thicker and uses the full accent color.
 - The list scrolls when it is taller than `CardLayout.maxListHeight`.
 
 ### Child cards
