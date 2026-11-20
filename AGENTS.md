@@ -29,7 +29,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `CanvasModel`, restores it at the start and saves it when the app quits. |
 | `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `CanvasModel`. |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
-| `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll and drag events on the canvas. |
+| `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, drag and cursor move events on the canvas. |
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, double-click, drag to move. |
 | `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel` and save and restore. |
 
@@ -49,7 +49,9 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - At the start, the canvas is empty and shows a dot grid with the text "Drag a folder here".
 - A drop of one or more folders makes one card for each folder, near the cursor. Items that are not folders are ignored.
 - A trackpad pinch zooms from 25% to 300%. The point under the cursor stays in place. Pinch works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
-- A two-finger scroll, the mouse wheel, or a drag on empty canvas moves (pans) the canvas.
+- A drag on empty canvas moves (pans) the canvas.
+- A two-finger scroll or the mouse wheel on empty canvas does nothing.
+- When you hold the Control key and move the cursor, the canvas moves with the cursor. This works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
 - The dot grid moves and scales with the canvas. When the dots are too close together, they are hidden.
 
 ### Save and restore

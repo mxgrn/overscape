@@ -3,8 +3,8 @@ import SwiftUI
 
 /// An AppKit view behind the cards that turns raw input into canvas navigation:
 /// - pinch anywhere in the canvas zooms around the cursor,
-/// - two-finger scroll or the mouse wheel on empty canvas pans,
-/// - a mouse drag on empty canvas pans.
+/// - a mouse drag on empty canvas pans,
+/// - a cursor move with the Control key pans anywhere in the canvas.
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     var onMagnify: (_ factor: CGFloat, _ location: CGPoint) -> Void
@@ -25,6 +25,7 @@ struct CanvasEventView: NSViewRepresentable {
         var onPan: (CGSize) -> Void = { _ in }
         var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
         private var magnifyMonitor: Any?
+        private var moveMonitor: Any?
 
         override var isFlipped: Bool { true }
 
@@ -41,6 +42,17 @@ struct CanvasEventView: NSViewRepresentable {
                 self.onMagnify(1 + event.magnification, location)
                 return nil
             }
+            // With the Control key, the canvas follows the cursor, also over a card.
+            // The event continues to the views, so that card hover stays correct.
+            window?.acceptsMouseMovedEvents = true
+            moveMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+                guard let self, event.window === self.window,
+                      event.modifierFlags.contains(.control) else { return event }
+                let location = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(location) else { return event }
+                self.onPan(CGSize(width: event.deltaX, height: event.deltaY))
+                return event
+            }
         }
 
         override func removeFromSuperview() {
@@ -51,12 +63,8 @@ struct CanvasEventView: NSViewRepresentable {
         private func removeMonitor() {
             if let magnifyMonitor { NSEvent.removeMonitor(magnifyMonitor) }
             magnifyMonitor = nil
-        }
-
-        override func scrollWheel(with event: NSEvent) {
-            // A classic mouse wheel reports lines, not points.
-            let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
-            onPan(CGSize(width: event.scrollingDeltaX * scale, height: event.scrollingDeltaY * scale))
+            if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
+            moveMonitor = nil
         }
 
         override func mouseDragged(with event: NSEvent) {
