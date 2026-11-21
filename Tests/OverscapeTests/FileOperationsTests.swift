@@ -76,6 +76,50 @@ struct FileOperationsTests {
         #expect(model.selection?.url == second.url)
     }
 
+    @Test func newFolderMakesAFolderInTheCardUnderTheCursorAndStartsItsRename() throws {
+        let root = try makeFolder(items: [])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        model.setHovered(model.cards[0].id, true)
+
+        model.newFolder()
+
+        let folder = try #require(model.cards[0].entries.first)
+        #expect(folder.name == "untitled folder")
+        #expect(folder.isDirectory)
+        #expect(model.selection == ItemRef(cardID: model.cards[0].id, url: folder.url))
+        #expect(model.renaming == model.selection)
+        #expect(model.renameDraft == "untitled folder")
+    }
+
+    @Test func aSecondNewFolderGetsAFreeNameAndUndoRemovesIt() throws {
+        let root = try makeFolder(items: ["untitled folder/"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.trash = { try FileManager.default.removeItem(at: $0); return nil }
+        model.addFolders([root], at: .zero)
+        model.setHovered(model.cards[0].id, true)
+
+        model.newFolder()
+
+        #expect(names(in: model.cards[0]) == ["untitled folder", "untitled folder 2"])
+
+        model.undo()
+
+        #expect(names(in: model.cards[0]) == ["untitled folder"])
+    }
+
+    @Test func newFolderDoesNothingWhenNoCardIsUnderTheCursor() throws {
+        let root = try makeFolder(items: [])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+
+        #expect(!model.newFolder())
+        #expect(model.cards[0].entries.isEmpty)
+    }
+
     @Test func moveToTrashRemovesTheItemAndItsCardAndUndoPutsTheItemBack() throws {
         let root = try makeFolder(items: ["a/"])
         defer { try? FileManager.default.removeItem(at: root) }

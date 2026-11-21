@@ -65,6 +65,14 @@ enum FileOperations {
         return target
     }
 
+    /// Makes a new folder in `folder`. Returns the URL of the new folder.
+    /// The name is the name that Finder uses: "untitled folder", "untitled folder 2".
+    static func newFolder(in folder: URL) throws -> URL {
+        let target = freeURL(for: folder.appendingPathComponent("untitled folder"), in: folder, isCopy: false)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+        return target
+    }
+
     /// Moves the item to the Trash. Returns the URL of the item in the Trash, when the system gives it.
     static func trash(_ item: URL) throws -> URL? {
         var trashed: NSURL?

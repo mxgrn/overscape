@@ -289,6 +289,7 @@ enum CanvasCommand: Equatable {
     case showParentFolder
     case closeCard
     case rename
+    case newFolder
     case moveToTrash
     case copy
     case paste
@@ -301,6 +302,7 @@ enum UndoStep {
     case rename(from: URL, to: URL)
     case move([(from: URL, to: URL)])
     case copy([URL])
+    case newFolder(URL)
     case trash(original: URL, trashed: URL)
 }
 
@@ -766,6 +768,7 @@ final class CanvasModel {
         case .showParentFolder: showParentFolderInHoveredCard()
         case .closeCard: closeHoveredCard()
         case .rename: beginRename()
+        case .newFolder: newFolder()
         case .moveToTrash: trashSelection()
         case .copy: copySelection()
         case .paste: paste()
@@ -855,6 +858,24 @@ final class CanvasModel {
         }
     }
 
+    /// Makes a new folder in the folder of the card under the cursor, as in Finder.
+    /// The new folder becomes the selected item and its rename starts.
+    /// Returns false when there is no card under the cursor.
+    @discardableResult
+    func newFolder() -> Bool {
+        guard let cardID = hoveredCardID else { return false }
+        // A rename can change the URL of the card. Thus get the URL after the rename ends.
+        commitRename()
+        guard let folder = cards.first(where: { $0.id == cardID })?.url else { return false }
+        var created: URL?
+        guard attempt({ created = try FileOperations.newFolder(in: folder) }), let created else { return true }
+        undoSteps.append(.newFolder(created))
+        reload()
+        select(itemNamed: created.lastPathComponent, in: cardID)
+        beginRename()
+        return true
+    }
+
     /// Moves the selected item to the Trash. Returns false when no item is selected.
     @discardableResult
     func trashSelection() -> Bool {
@@ -926,8 +947,8 @@ final class CanvasModel {
         return true
     }
 
-    /// Reverses the last file operation: a rename, a move to the Trash, a paste or a drop.
-    /// The undo of a copy moves the copy to the Trash. Returns false when there is no operation to reverse.
+    /// Reverses the last file operation: a rename, a new folder, a move to the Trash, a paste or a drop.
+    /// The undo of a copy or of a new folder moves the new item to the Trash. Returns false when there is no operation to reverse.
     @discardableResult
     func undo() -> Bool {
         guard let step = undoSteps.popLast() else { return false }
@@ -944,6 +965,8 @@ final class CanvasModel {
             for copy in copies {
                 attempt { _ = try trash(copy) }
             }
+        case .newFolder(let folder):
+            attempt { _ = try trash(folder) }
         case .trash(let original, let trashed):
             attempt { try FileManager.default.moveItem(at: trashed, to: original) }
         }
