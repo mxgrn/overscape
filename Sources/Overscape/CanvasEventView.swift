@@ -6,13 +6,15 @@ import SwiftUI
 /// - pinch anywhere in the canvas zooms around the cursor,
 /// - a mouse drag on empty canvas pans,
 /// - a two-finger scroll that starts on empty canvas pans,
+/// - a two-finger scroll with the Control key pans, also when it starts on a card,
 /// - a click on empty canvas removes the selection,
 /// - the keys of Finder become canvas commands (arrow keys, view modes, open, Quick Look, parent folder, rename,
 ///   new folder, Trash, copy, paste, undo).
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     /// The start of a two-finger scroll. The location is nil when the scroll starts outside the canvas.
-    var onScrollBegan: (CGPoint?) -> Void
+    /// The second value is the state of the Control key.
+    var onScrollBegan: (CGPoint?, Bool) -> Void
     /// Returns false when the scroll does not pan the canvas. The event then continues.
     var onScroll: (CGSize) -> Bool
     var onMagnify: (_ factor: CGFloat, _ location: CGPoint) -> Void
@@ -43,7 +45,7 @@ struct CanvasEventView: NSViewRepresentable {
 
     final class EventNSView: NSView {
         var onPan: (CGSize) -> Void = { _ in }
-        var onScrollBegan: (CGPoint?) -> Void = { _ in }
+        var onScrollBegan: (CGPoint?, Bool) -> Void = { _, _ in }
         var onScroll: (CGSize) -> Bool = { _ in false }
         var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
         var onMouseDown: () -> Void = {}
@@ -77,7 +79,7 @@ struct CanvasEventView: NSViewRepresentable {
                 if event.phase.contains(.began) {
                     let location = self.convert(event.locationInWindow, from: nil)
                     let isOnCanvas = event.window === self.window && self.bounds.contains(location)
-                    self.onScrollBegan(isOnCanvas ? location : nil)
+                    self.onScrollBegan(isOnCanvas ? location : nil, event.modifierFlags.contains(.control))
                 }
                 // The decision from the start of the scroll stays until the momentum ends.
                 let delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)

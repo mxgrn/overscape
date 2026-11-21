@@ -11,7 +11,7 @@ struct CanvasView: View {
 
             CanvasEventView(
                 onPan: { model.pan(by: $0) },
-                onScrollBegan: { model.beginScroll(at: $0) },
+                onScrollBegan: { model.beginScroll(at: $0, withControl: $1) },
                 onScroll: { model.scroll(by: $0) },
                 onMagnify: { model.zoom(by: $0, around: $1) },
                 onMouseDown: { model.clearSelection() },

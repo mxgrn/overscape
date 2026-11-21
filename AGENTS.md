@@ -62,6 +62,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - A drag on empty canvas moves (pans) the canvas.
 - A two-finger scroll that starts on empty canvas moves (pans) the canvas. The pan continues until the scroll and its momentum end, also when a card moves below the cursor. A local `NSEvent` monitor catches it.
 - A two-finger scroll that starts on a card does not pan the canvas. It scrolls the file list of that card. The model makes this decision at the start of each scroll (`beginScroll`), from the card frames.
+- A two-finger scroll with the Control key pans the canvas, also when it starts on a card. The file list of the card does not scroll. The state of the Control key at the start of the scroll applies until the scroll and its momentum end.
 - The mouse wheel on empty canvas does nothing.
 - The dot grid moves and scales with the canvas. When the dots are too close together, they are hidden.
 

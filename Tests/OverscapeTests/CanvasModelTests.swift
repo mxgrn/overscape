@@ -46,6 +46,20 @@ struct CanvasModelTests {
         #expect(model.pan == .zero)
     }
 
+    @Test func aScrollWithControlPansAlsoFromACard() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: CGPoint(x: 100, y: 100))
+
+        model.beginScroll(at: CGPoint(x: 110, y: 110), withControl: true)
+        #expect(model.scroll(by: CGSize(width: 0, height: 30)))
+        #expect(model.pan == CGSize(width: 0, height: 30))
+
+        model.beginScroll(at: nil, withControl: true)
+        #expect(!model.scroll(by: CGSize(width: 0, height: 30)))
+    }
+
     @Test func childCardsKeepTheOrderOfTheirRows() throws {
         let root = try makeFolder(subfolders: ["a", "b", "c"])
         defer { try? FileManager.default.removeItem(at: root) }
