@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The window content: the sidebar with the workspaces and the canvas of the selected workspace.
 struct MainView: View {
@@ -43,8 +44,21 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .selectionDisabled()
             }
+            // The favorites of the selected workspace.
+            Section("Favorites") {
+                ForEach(model.selected.favorites, id: \.path) { folder in
+                    favoriteRow(for: folder)
+                }
+                if model.selected.favorites.isEmpty {
+                    Text("Drag a folder here")
+                        .foregroundStyle(.tertiary)
+                        .selectionDisabled()
+                }
+            }
         }
         .listStyle(.sidebar)
+        // A folder from Finder or from a card becomes a favorite.
+        .dropDestination(for: URL.self) { urls, _ in model.addFavorites(urls) }
         .confirmationDialog(
             "Delete the workspace “\(pendingDelete?.name ?? "")”?",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -102,6 +116,31 @@ struct SidebarView: View {
         }
     }
 
+    /// A click adds a card at the center of the canvas. A drag to the canvas adds a card at the drop position.
+    private func favoriteRow(for folder: URL) -> some View {
+        Label(folder.lastPathComponent.isEmpty ? folder.path : folder.lastPathComponent, systemImage: Self.symbol(for: folder))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { model.selected.canvas.addFolderAtCenter(folder) }
+            .onDrag { FavoriteDrag.itemProvider(for: folder) }
+            .contextMenu {
+                Button("Remove from Favorites") { model.removeFavorite(folder) }
+            }
+            .selectionDisabled()
+            .help(folder.path)
+    }
+
+    /// The standard folders have the same symbols as in the Finder sidebar.
+    private static func symbol(for folder: URL) -> String {
+        switch folder.path {
+        case URL.homeDirectory.path: "house"
+        case URL.desktopDirectory.path: "menubar.dock.rectangle"
+        case URL.documentsDirectory.path: "doc"
+        case URL.downloadsDirectory.path: "arrow.down.circle"
+        default: "folder"
+        }
+    }
+
     private func addWorkspace() {
         let id = model.add()
         if let workspace = model.workspaces.first(where: { $0.id == id }) {
@@ -126,6 +165,30 @@ struct SidebarView: View {
             pendingDelete = workspace
         } else {
             model.delete(workspace.id)
+        }
+    }
+}
+
+/// A drag that starts at a favorite in the sidebar.
+/// The drag has the folder path in a private type and no file URL. Thus a drop on a card or on a
+/// different app cannot move the folder on disk. Only the canvas accepts the drag.
+enum FavoriteDrag {
+    static let type = UTType(exportedAs: "com.mxgrn.overscape.favorite")
+
+    static func itemProvider(for folder: URL) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: type.identifier, visibility: .ownProcess) { completion in
+            completion(Data(folder.path.utf8), nil)
+            return nil
+        }
+        return provider
+    }
+
+    /// Gives the folder of a dropped favorite to `action` on the main actor.
+    static func loadFolder(from provider: NSItemProvider, action: @escaping @MainActor (URL) -> Void) {
+        _ = provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in
+            guard let data, let path = String(data: data, encoding: .utf8) else { return }
+            Task { @MainActor in action(URL(fileURLWithPath: path, isDirectory: true)) }
         }
     }
 }

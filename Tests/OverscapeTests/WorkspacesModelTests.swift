@@ -77,4 +77,49 @@ struct WorkspacesModelTests {
         #expect(model.workspaces.count == 1)
         #expect(model.selected.canvas.zoom == 2)
     }
+
+    @Test func addFavoritesIgnoresFilesAndFoldersThatAreAlreadyFavorites() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("a.txt")
+        try Data().write(to: file)
+        let model = WorkspacesModel()
+
+        #expect(model.addFavorites([folder, file]))
+        #expect(!model.addFavorites([folder]))
+
+        #expect(model.selected.favorites == Workspace.standardFavorites + [folder])
+    }
+
+    @Test func eachWorkspaceHasItsOwnFavorites() {
+        let model = WorkspacesModel()
+        let first = model.selectedID
+        model.removeFavorite(.desktopDirectory)
+        model.add()
+
+        #expect(model.selected.favorites == Workspace.standardFavorites)
+        model.select(first)
+        #expect(model.selected.favorites == [.homeDirectory, .documentsDirectory, .downloadsDirectory])
+    }
+
+    @Test func restoreKeepsTheFavorites() {
+        let model = WorkspacesModel()
+        model.removeFavorite(.homeDirectory)
+
+        let restored = WorkspacesModel()
+        restored.restore(model.snapshot)
+
+        #expect(restored.selected.favorites.map(\.path) == model.selected.favorites.map(\.path))
+    }
+
+    @Test func aFileFromAVersionWithoutFavoritesGetsTheStandardFavorites() throws {
+        let json = #"{"workspaces":[{"id":"\#(UUID())","name":"Old","canvas":{"cards":[],"zoom":1,"panX":0,"panY":0}}]}"#
+        let model = WorkspacesModel()
+        model.removeFavorite(.homeDirectory)
+
+        model.restore(try JSONDecoder().decode(WorkspacesSnapshot.self, from: Data(json.utf8)))
+
+        #expect(model.selected.favorites == Workspace.standardFavorites)
+    }
 }

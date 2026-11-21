@@ -1,11 +1,18 @@
 import Foundation
 import Observation
 
-/// A named canvas. Each workspace has its own cards, zoom and pan.
+/// A named canvas. Each workspace has its own cards, zoom, pan and favorite folders.
 struct Workspace: Identifiable {
     let id: UUID
     var name: String
     let canvas: CanvasModel
+    /// The folders in the Favorites section of the sidebar.
+    var favorites: [URL] = Workspace.standardFavorites
+
+    /// The favorites of a new workspace: Home, Desktop, Documents and Downloads.
+    static var standardFavorites: [URL] {
+        [URL.homeDirectory, .desktopDirectory, .documentsDirectory, .downloadsDirectory]
+    }
 }
 
 /// The saved state of all workspaces.
@@ -14,6 +21,9 @@ struct WorkspacesSnapshot: Codable, Equatable {
         let id: UUID
         let name: String
         let canvas: CanvasSnapshot
+        /// The paths of the favorite folders. Nil in files from versions without favorites.
+        /// Nil means the standard favorites.
+        var favorites: [String]? = nil
     }
 
     var workspaces: [Workspace]
@@ -62,7 +72,9 @@ final class WorkspacesModel {
 
     var snapshot: WorkspacesSnapshot {
         WorkspacesSnapshot(
-            workspaces: workspaces.map { .init(id: $0.id, name: $0.name, canvas: $0.canvas.snapshot) },
+            workspaces: workspaces.map {
+                .init(id: $0.id, name: $0.name, canvas: $0.canvas.snapshot, favorites: $0.favorites.map(\.path))
+            },
             selectedID: selectedID
         )
     }
@@ -73,7 +85,11 @@ final class WorkspacesModel {
         workspaces = snapshot.workspaces.map { saved in
             let canvas = CanvasModel()
             canvas.restore(saved.canvas)
-            return Workspace(id: saved.id, name: saved.name, canvas: canvas)
+            let favorites = saved.favorites?.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            return Workspace(
+                id: saved.id, name: saved.name, canvas: canvas,
+                favorites: favorites ?? Workspace.standardFavorites
+            )
         }
         let ids = workspaces.map(\.id)
         selectedID = snapshot.selectedID.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0]
@@ -121,5 +137,28 @@ final class WorkspacesModel {
         if selectedID == id {
             selectedID = workspaces[min(index, workspaces.count - 1)].id
         }
+    }
+
+    /// Adds the folders to the end of the favorites of the selected workspace.
+    /// Items that are not folders and folders that are already favorites are ignored.
+    /// Returns false when nothing was added.
+    @discardableResult
+    func addFavorites(_ urls: [URL]) -> Bool {
+        guard let index = workspaces.firstIndex(where: { $0.id == selectedID }) else { return false }
+        var added = false
+        for url in urls where FolderLoader.isDirectory(url) {
+            let isKnown = workspaces[index].favorites.contains { $0.path == url.path }
+            if !isKnown {
+                workspaces[index].favorites.append(url)
+                added = true
+            }
+        }
+        return added
+    }
+
+    /// Removes the folder from the favorites of the selected workspace. The folder on disk does not change.
+    func removeFavorite(_ url: URL) {
+        guard let index = workspaces.firstIndex(where: { $0.id == selectedID }) else { return }
+        workspaces[index].favorites.removeAll { $0.path == url.path }
     }
 }

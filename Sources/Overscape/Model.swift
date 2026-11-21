@@ -283,6 +283,8 @@ final class CanvasModel {
     /// Viewport: a canvas point `p` shows at `p * zoom + pan` in the view.
     var zoom: CGFloat = 1
     var pan: CGSize = .zero
+    /// The size of the canvas view. The view sets it. The model needs it to find the center of the visible canvas.
+    @ObservationIgnored var viewSize: CGSize = .zero
     /// True when the current two-finger scroll pans the canvas.
     private(set) var isScrollPanning = false
 
@@ -388,6 +390,23 @@ final class CanvasModel {
             ))
         }
         return !folders.isEmpty
+    }
+
+    /// Adds a card for the folder at the center of the visible canvas.
+    /// If a card is already at that position, the new card goes down and to the right, so that both show.
+    /// Returns false when `url` is not a folder.
+    @discardableResult
+    func addFolderAtCenter(_ url: URL) -> Bool {
+        guard FolderLoader.isDirectory(url) else { return false }
+        var card = FolderCard(url: url, position: .zero, entries: FolderLoader.entries(in: url))
+        let center = canvasPoint(fromView: CGPoint(x: viewSize.width / 2, y: viewSize.height / 2))
+        card.position = CGPoint(x: center.x - card.width / 2, y: center.y - card.height / 2)
+        while cards.contains(where: { $0.position == card.position }) {
+            card.position.x += 30
+            card.position.y += 30
+        }
+        cards.append(card)
+        return true
     }
 
     func move(_ id: FolderCard.ID, to position: CGPoint) {

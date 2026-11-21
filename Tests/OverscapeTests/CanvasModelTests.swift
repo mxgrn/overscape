@@ -236,6 +236,23 @@ struct CanvasModelTests {
         #expect(restored.cards.map(\.id) == [model.cards[1].id])
     }
 
+    @Test func addFolderAtCenterPutsTheCardAtTheCenterOfTheVisibleCanvas() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.viewSize = CGSize(width: 800, height: 600)
+        model.pan(by: CGSize(width: 100, height: 0))
+        model.zoom(by: 2, around: .zero)
+
+        model.addFolderAtCenter(root)
+        model.addFolderAtCenter(root)
+
+        let center = model.canvasPoint(fromView: CGPoint(x: 400, y: 300))
+        let first = model.cards[0].frame
+        #expect(CGPoint(x: first.midX, y: first.midY) == center)
+        #expect(model.cards[1].position == CGPoint(x: first.minX + 30, y: first.minY + 30))
+    }
+
     private func makeFolder(subfolders: [String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         for name in subfolders {

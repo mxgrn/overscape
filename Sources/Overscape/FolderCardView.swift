@@ -66,6 +66,8 @@ struct FolderCardView: View {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: card.url.path))
                     .resizable()
                     .frame(width: 16, height: 16)
+                    // Drag the icon to the sidebar to make the folder a favorite.
+                    .onDrag { NSItemProvider(object: card.url as NSURL) }
                 Text(card.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)

@@ -29,8 +29,8 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
 | `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `ItemRef`, `CanvasCommand`, `UndoStep`, `CanvasModel`. |
 | `Sources/Overscape/FileOperations.swift` | `FileOperations` (copy, move and Trash on disk, free names, the volume check) and `FolderWatcher` (reports changes in a folder). |
-| `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel`. |
-| `Sources/Overscape/SidebarView.swift` | `MainView` (sidebar and canvas in a `NavigationSplitView`) and `SidebarView` (the list of workspaces). |
+| `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel` and its own favorites. |
+| `Sources/Overscape/SidebarView.swift` | `MainView` (sidebar and canvas in a `NavigationSplitView`), `SidebarView` (the list of workspaces and the favorites) and `FavoriteDrag` (the drag of a favorite). |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
 | `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll, click and drag events on the canvas and changes keys into `CanvasCommand` values. |
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, the name field for a rename, double-click, drag to move, drag and drop of items. |
@@ -70,21 +70,33 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - The × button on the selected workspace (or "Delete" in the context menu) deletes it. If the workspace has cards, the app asks for confirmation first. The folders on disk do not change.
 - There is always at least one workspace. The last workspace cannot be deleted.
 
+### Favorites
+
+- The sidebar has a "Favorites" section below the workspaces. It shows the favorite folders of the selected workspace. Each workspace has its own favorites.
+- A new workspace starts with the standard favorites: Home, Desktop, Documents and Downloads.
+- A click on a favorite adds a card for the folder at the center of the visible canvas (`addFolderAtCenter`). The canvas view reports its size to the model (`viewSize`). If a card is already at that position, the new card goes 30 points down and to the right.
+- A drag of a favorite to the canvas adds a card at the drop position.
+- The drag of a favorite has the folder path in a private type (`FavoriteDrag`) and no file URL. Thus a drop on a card or on a different app cannot move the folder on disk.
+- To add a favorite, drag a folder to the sidebar: from Finder, a folder row or icon in a card, or the folder icon in a card header. The folder goes to the end of the list. Items that are not folders and folders that are already favorites are ignored.
+- "Remove from Favorites" in the context menu removes a favorite. The folder on disk does not change.
+- A favorite whose folder does not exist stays in the list. A click on it does nothing.
+
 ### Save and restore
 
 - The app has one window, so there is one set of workspaces.
-- When the app quits, it saves all workspaces (their names, the selected workspace, and for each workspace the open cards (root and child cards), their positions, their sizes, their view modes, and the zoom and pan). The file is `~/Library/Application Support/Overscape/workspaces.json`.
+- When the app quits, it saves all workspaces (their names, the selected workspace, and for each workspace the favorites, the open cards (root and child cards), their positions, their sizes, their view modes, and the zoom and pan). The file is `~/Library/Application Support/Overscape/workspaces.json`.
 - If there is no `workspaces.json`, the app reads `canvas.json` from a version without workspaces into the first workspace. The app does not change or delete `canvas.json`.
 - At the start, the app restores the saved canvas. It reads the file lists from disk again.
 - If a saved folder does not exist, its card and all cards opened from it are not restored.
 - The app saves only on a normal quit. A crash or a force quit loses the changes since the last start.
 - The scroll offset of the file lists and the selected rows are not saved.
+- A saved file from a version without favorites restores each workspace with the standard favorites.
 - A saved file from a version without view modes restores all cards in list mode.
 - A saved file from a version without resize restores all cards with the default width and the height from the content.
 
 ### Cards
 
-- A header with the folder icon, the folder name, the number of items and a close (×) button. Drag the header to move the card.
+- A header with the folder icon, the folder name, the number of items and a close (×) button. Drag the header to move the card. A drag that starts on the folder icon drags the folder itself, as a row does.
 - The columns are Name, Size and Date Modified. Dates use the format `dd.MM.yy, HH:mm`. Folders show `--` as the size.
 - Items are sorted newest first. Hidden files are not shown.
 - A single click selects a row. Rows that have an open child card are not highlighted. Only the selected row is highlighted.
@@ -151,6 +163,7 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - A folder that gets a new name in a different app is a removed folder and a new folder for the live update. Its cards close.
 - An item cannot be dropped on a folder row to put it into that subfolder. The drop always goes into the folder of the card.
 - The file commands are not in the menu bar. The Edit menu items stay disabled, but the keys work.
+- The favorites cannot be put in a different order.
 - Undo can fail when a different operation changed the same items after the operation. An alert then shows.
 
 ## Conventions

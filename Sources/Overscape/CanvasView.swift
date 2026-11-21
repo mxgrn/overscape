@@ -36,6 +36,12 @@ struct CanvasView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        // A click on a favorite puts a card at the center of the view, so the model must know the view size.
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            model.viewSize = size
+        }
         .overlay {
             if isTargeted {
                 RoundedRectangle(cornerRadius: 8)
@@ -48,6 +54,15 @@ struct CanvasView: View {
             let corner = CGPoint(x: location.x - 20, y: location.y - 15)
             return model.addFolders(urls, at: model.canvasPoint(fromView: corner))
         } isTargeted: { isTargeted = $0 }
+        // A favorite from the sidebar makes a card at the drop position.
+        .onDrop(of: [FavoriteDrag.type], isTargeted: $isTargeted) { providers, location in
+            guard let provider = providers.first else { return false }
+            FavoriteDrag.loadFolder(from: provider) { folder in
+                let corner = CGPoint(x: location.x - 20, y: location.y - 15)
+                model.addFolders([folder], at: model.canvasPoint(fromView: corner))
+            }
+            return true
+        }
         .alert(
             "The operation did not complete",
             isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
