@@ -277,6 +277,22 @@ struct CanvasModelTests {
         #expect(model.connections.map(\.id) == [card.id, child.id])
     }
 
+    @Test func aCardKeepsItsHeightWhenItShowsADifferentFolder() throws {
+        let root = try makeFolder(subfolders: ["a/b", "a/c"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        model.openChild(of: model.cards[0].id, folder: model.cards[0].entries[0].url)
+        let heights = model.cards.map(\.height)
+
+        // The first card gets more items and the second card gets fewer items.
+        model.open(model.cards[0].entries[0].url, in: model.cards[0].id)
+        model.open(model.cards[1].entries[0].url, in: model.cards[1].id)
+
+        #expect(model.cards.map(\.entries.count) == [2, 0])
+        #expect(model.cards.map(\.height) == heights)
+    }
+
     @Test func aDoubleClickWithCommandOpensAFolderInAChildCard() throws {
         let root = try makeFolder(subfolders: ["a"])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -305,6 +321,75 @@ struct CanvasModelTests {
 
         #expect(model.cards[0].entries.map(\.url) == [subfolder])
         #expect(model.selection == ItemRef(cardID: card.id, url: subfolder))
+    }
+
+    @Test func arrowKeysMoveTheSelectionInAList() throws {
+        let root = try makeFolder(subfolders: ["a", "b", "c"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        let rows = card.entries.map(\.url)
+
+        #expect(!model.perform(.moveSelection(.down)))
+
+        model.setHovered(card.id, true)
+        var selected: [URL?] = []
+        for direction in [ArrowDirection.down, .down, .right, .up, .up] {
+            #expect(model.perform(.moveSelection(direction)))
+            selected.append(model.selection?.url)
+        }
+        #expect(selected == [rows[0], rows[1], rows[1], rows[0], rows[0]])
+
+        model.clearSelection()
+        model.perform(.moveSelection(.up))
+        #expect(model.selection?.url == rows[2])
+    }
+
+    @Test func anArrowKeyMovesTheSelectionToTheCardUnderTheCursor() throws {
+        let root = try makeFolder(subfolders: ["a", "b"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root, root], at: .zero)
+        let rows = model.cards[0].entries.map(\.url)
+        model.select(rows[1], in: model.cards[0].id)
+
+        model.setHovered(model.cards[1].id, true)
+        model.perform(.moveSelection(.down))
+
+        #expect(model.selection == ItemRef(cardID: model.cards[1].id, url: rows[0]))
+    }
+
+    @Test func arrowKeysMoveTheSelectionInAGridOfIcons() throws {
+        let root = try makeFolder(subfolders: ["a", "b", "c", "d", "e", "f"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        model.setHovered(card.id, true)
+        model.setViewModeOfHoveredCard(.icons)
+
+        // With 4 icons on each grid line, the second line has the items 4 and 5.
+        var selected: [Int?] = []
+        for direction in [ArrowDirection.left, .up, .up, .right, .right, .down, .down, .left, .left] {
+            model.perform(.moveSelection(direction))
+            selected.append(card.entries.firstIndex { $0.url == model.selection?.url })
+        }
+        #expect(selected == [5, 1, 1, 2, 3, 5, 5, 4, 3])
+    }
+
+    @Test func commandDownShowsTheSelectedFolderInTheSameCard() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let subfolder = model.cards[0].entries[0].url
+
+        #expect(!model.perform(.openSelection))
+        model.select(subfolder, in: model.cards[0].id)
+        #expect(model.perform(.openSelection))
+
+        #expect(model.cards.map(\.url) == [subfolder])
     }
 
     private func makeFolder(subfolders: [String]) throws -> URL {

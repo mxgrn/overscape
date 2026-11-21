@@ -249,9 +249,19 @@ enum TransferKind {
     case copy
 }
 
+/// The direction of an arrow key.
+enum ArrowDirection {
+    case up
+    case down
+    case left
+    case right
+}
+
 /// A keyboard command for the canvas.
 enum CanvasCommand: Equatable {
     case viewMode(CardViewMode)
+    case moveSelection(ArrowDirection)
+    case openSelection
     case showParentFolder
     case rename
     case moveToTrash
@@ -541,7 +551,8 @@ final class CanvasModel {
         return true
     }
 
-    /// Makes the card show a different folder. The card keeps its position and its size.
+    /// Makes the card show a different folder. The card keeps its position and its size:
+    /// it gets its height at this time as a fixed height, also when the new folder has more or fewer items.
     /// The card that it was opened from and the cards that were opened from it stay open and stay related.
     /// Their connector lines show again when the folders agree with the rows again (`connections`).
     private func show(_ folder: URL, in cardID: FolderCard.ID) {
@@ -549,6 +560,7 @@ final class CanvasModel {
         guard FolderLoader.isDirectory(folder),
               let index = cards.firstIndex(where: { $0.id == cardID })
         else { return }
+        cards[index].fixedHeight = cards[index].height
         cards[index].url = folder
         cards[index].entries = FolderLoader.entries(in: folder)
         cards[index].scrollOffset = 0 // The new item area starts at the top.
@@ -638,6 +650,45 @@ final class CanvasModel {
         selection = nil
     }
 
+    /// Moves the selection in the card under the cursor to the adjacent item, as the arrow keys do in Finder.
+    /// If the card has no selected item, Down and Right select the first item and Up and Left select the last item.
+    /// In list mode, Left and Right do nothing. In icon mode, Left and Right continue on the adjacent line.
+    /// Returns false when there is no card under the cursor.
+    @discardableResult
+    func moveSelectionInHoveredCard(_ direction: ArrowDirection) -> Bool {
+        guard let card = cards.first(where: { $0.id == hoveredCardID }) else { return false }
+        let isForward = direction == .down || direction == .right
+        let isHorizontal = direction == .left || direction == .right
+        if card.viewMode == .list, isHorizontal { return true }
+        guard let last = card.entries.indices.last else { return true }
+
+        var index = isForward ? 0 : last
+        if let selection, selection.cardID == card.id,
+           let current = card.entries.firstIndex(where: { $0.url == selection.url }) {
+            let columns = card.viewMode == .icons ? card.iconColumns : 1
+            let target = current + (isForward ? 1 : -1) * (isHorizontal ? 1 : columns)
+            if card.entries.indices.contains(target) {
+                index = target
+            } else if direction == .down, current / columns < last / columns {
+                // The last line of icons is shorter than the line above it.
+                index = last
+            } else {
+                index = current
+            }
+        }
+        select(card.entries[index].url, in: card.id)
+        return true
+    }
+
+    /// Opens the selected item as a double-click does: a file opens in its default app and a folder
+    /// shows in the same card. Returns false when no item is selected.
+    @discardableResult
+    func openSelection() -> Bool {
+        guard let selection, isShown(selection) else { return false }
+        open(selection.url, in: selection.cardID)
+        return true
+    }
+
     private func isShown(_ item: ItemRef) -> Bool {
         cards.first { $0.id == item.cardID }?.entries.contains { $0.url == item.url } ?? false
     }
@@ -654,6 +705,8 @@ final class CanvasModel {
     func perform(_ command: CanvasCommand) -> Bool {
         switch command {
         case .viewMode(let mode): setViewModeOfHoveredCard(mode)
+        case .moveSelection(let direction): moveSelectionInHoveredCard(direction)
+        case .openSelection: openSelection()
         case .showParentFolder: showParentFolderInHoveredCard()
         case .rename: beginRename()
         case .moveToTrash: trashSelection()

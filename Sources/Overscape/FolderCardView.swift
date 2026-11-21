@@ -132,6 +132,7 @@ struct FolderCardView: View {
         .id(card.url)
         .coordinateSpace(.named(Self.listSpace))
         .frame(height: card.contentHeight, alignment: .top)
+        .showsSelection(of: model, in: card)
     }
 
     /// Icon mode. Icons with an open child card are not highlighted, only the selected icon.
@@ -168,6 +169,7 @@ struct FolderCardView: View {
         .id(card.url)
         .coordinateSpace(.named(Self.listSpace))
         .frame(height: card.contentHeight, alignment: .top)
+        .showsSelection(of: model, in: card)
     }
 
     private func iconCell(_ entry: FileEntry) -> some View {
@@ -343,6 +345,19 @@ struct FolderCardView: View {
     static func format(size: Int64?) -> String {
         guard let size else { return "--" }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+}
+
+private extension View {
+    /// Scrolls the item area of the card when the selected item is not fully in view,
+    /// for example after an arrow key.
+    func showsSelection(of model: CanvasModel, in card: FolderCard) -> some View {
+        ScrollViewReader { proxy in
+            onChange(of: model.selection) { _, selection in
+                guard let selection, selection.cardID == card.id else { return }
+                proxy.scrollTo(selection.url)
+            }
+        }
     }
 }
 

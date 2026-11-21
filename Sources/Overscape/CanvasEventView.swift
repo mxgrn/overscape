@@ -6,7 +6,8 @@ import SwiftUI
 /// - a mouse drag on empty canvas pans,
 /// - a two-finger scroll that starts on empty canvas pans,
 /// - a click on empty canvas removes the selection,
-/// - the keys of Finder become canvas commands (view modes, parent folder, rename, Trash, copy, paste, undo).
+/// - the keys of Finder become canvas commands (arrow keys, view modes, open, parent folder, rename, Trash,
+///   copy, paste, undo).
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     /// The start of a two-finger scroll. The location is nil when the scroll starts outside the canvas.
@@ -94,6 +95,9 @@ struct CanvasEventView: NSViewRepresentable {
         private static let returnKey: UInt16 = 36
         private static let keypadEnterKey: UInt16 = 76
         private static let deleteKey: UInt16 = 51
+        private static let leftArrowKey: UInt16 = 123
+        private static let rightArrowKey: UInt16 = 124
+        private static let downArrowKey: UInt16 = 125
         private static let upArrowKey: UInt16 = 126
 
         private static func command(for event: NSEvent) -> CanvasCommand? {
@@ -104,7 +108,12 @@ struct CanvasEventView: NSViewRepresentable {
             switch (modifiers, event.keyCode, character) {
             case ([], returnKey, _), ([], keypadEnterKey, _): return .rename
             case (.command, deleteKey, _): return .moveToTrash
+            case ([], upArrowKey, _): return .moveSelection(.up)
+            case ([], downArrowKey, _): return .moveSelection(.down)
+            case ([], leftArrowKey, _): return .moveSelection(.left)
+            case ([], rightArrowKey, _): return .moveSelection(.right)
             case (.command, upArrowKey, _): return .showParentFolder
+            case (.command, downArrowKey, _): return .openSelection
             case (.command, _, "1"): return .viewMode(.icons)
             case (.command, _, "2"): return .viewMode(.list)
             case (.command, _, "c"): return .copy

@@ -107,6 +107,15 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - When the mouse is on a card, the card border becomes thicker and uses the full accent color.
 - The list scrolls when it is taller than `CardLayout.maxListHeight`.
 
+### Arrow keys
+
+- The arrow keys move the selection in the card under the cursor (`hoveredCardID`), as in Finder. If no card is under the cursor, the keys do nothing.
+- In list mode, Up and Down select the row above or below. Left and Right do nothing.
+- In icon mode, the four keys select the adjacent icon. Left and Right continue on the line above or below. When the last line is shorter, Down from the line above it selects the last icon.
+- If the card has no selected item, Down and Right select the first item, and Up and Left select the last item. This also applies when the selected item is in a different card: the selection moves to the card under the cursor.
+- At the first or the last item, the selection does not change.
+- The item area scrolls to show the selected item. The card view does this (`showsSelection`), also after a click on an item that is not fully in view.
+
 ### File operations
 
 The keys are the same as in Finder. They operate on the selected item. There is no multi-selection.
@@ -136,7 +145,7 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - Drag any of the 4 edges or the 4 corners of a card to resize it. The opposite edges stay in place. The cursor changes to a resize cursor on the edges and corners. On macOS 14, the corners show a crosshair cursor, because macOS 14 has no public diagonal resize cursor.
 - The resize area is half inside and half outside the card border.
 - A card cannot become smaller than `CardLayout.minWidth` and `CardLayout.minHeight`.
-- At the start, the height of a card comes from its content. When you move the top or the bottom edge, the card gets a fixed height. If the content is shorter, the card shows empty space. If the content is taller, the list scrolls. A change of the width only keeps the height from the content.
+- At the start, the height of a card comes from its content. When you move the top or the bottom edge, or when the card shows a different folder, the card gets a fixed height. If the content is shorter, the card shows empty space. If the content is taller, the list scrolls. A change of the width only keeps the height from the content.
 - In icon mode, the number of icons on each line changes with the card width. Each cell is at least `CardLayout.iconMinCellWidth` wide.
 - A resize does not move the child cards.
 
@@ -154,6 +163,8 @@ A double-click operates as in Finder.
 
 - A double-click on a file opens the file in its default app. A package (an app, for example) opens as a file. If the file does not open, an alert shows.
 - A double-click on a folder shows that folder in the same card. The card keeps its position, its size and its view mode. The items start at the top.
+- When a card shows a different folder (a double-click, Command-Down or Command-Up), the card gets its height at that time as a fixed height. Thus the card does not become smaller when the new folder has fewer items, and it does not become taller when the new folder has more items. If the content is taller, the list scrolls.
+- Command-Down opens the selected item, as a double-click does. The selected item can be in a card that is not under the cursor. If no item is selected, the key does nothing.
 - Command-Up shows the parent folder in the card under the cursor (`hoveredCardID`) and selects the folder that the card showed before. If no card is under the cursor, or the card shows the top folder of the disk, the key does nothing.
 - When a card shows a different folder, the card that it was opened from and the cards that were opened from it stay open. The cards stay related (`parentID`), but a connector line shows only while the folder of the child card is an item in the parent card. Thus the lines go when a card shows a different folder, and the lines come back when the card shows the initial folder again.
 - There is no history. A card cannot go back or forward.
