@@ -6,20 +6,23 @@ struct OverscapeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        // One window, so that there is one canvas to save and restore.
+        // One window, so that there is one set of workspaces to save and restore.
         Window("Overscape", id: "canvas") {
-            CanvasView(model: appDelegate.model)
-                .frame(minWidth: 800, minHeight: 500)
+            MainView(workspaces: appDelegate.workspaces)
+                .frame(minWidth: 900, minHeight: 500)
         }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let model: CanvasModel = {
-        let model = CanvasModel()
-        if let snapshot = SnapshotStore.load() {
+    let workspaces: WorkspacesModel = {
+        let model = WorkspacesModel()
+        if let snapshot = WorkspacesFile.load() {
             model.restore(snapshot)
+        } else if let legacy = SnapshotStore.load() {
+            // A file from a version without workspaces.
+            model.restore(legacyCanvas: legacy)
         }
         return model
     }()
@@ -33,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         do {
-            try SnapshotStore.save(model.snapshot)
+            try WorkspacesFile.save(workspaces.snapshot)
         } catch {
             NSLog("Overscape: cannot save the canvas: \(error)")
         }

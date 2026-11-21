@@ -26,16 +26,18 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 
 | File | Purpose |
 | --- | --- |
-| `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `CanvasModel`, restores it at the start and saves it when the app quits. |
+| `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
 | `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `CanvasModel`. |
+| `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel`. |
+| `Sources/Overscape/SidebarView.swift` | `MainView` (sidebar and canvas in a `NavigationSplitView`) and `SidebarView` (the list of workspaces). |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
 | `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, drag and cursor move events on the canvas. |
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, double-click, drag to move. |
-| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel` and save and restore. |
+| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel` and save and restore. |
 
 ## Architecture
 
-- `CanvasModel` is the single source of truth. It is `@MainActor` and `@Observable`. Views read from it and call its functions. Views do not keep canvas state.
+- `WorkspacesModel` holds the workspaces. Each workspace has its own `CanvasModel`. A `CanvasModel` is the single source of truth for one canvas. Both are `@MainActor` and `@Observable`. Views read from it and call its functions. Views do not keep canvas state.
 - Keep logic in the model, not in views. Then you can test it without UI. Each new behavior in the model must have a test.
 - **Coordinates.** Cards have positions in *canvas points*. The viewport maps a canvas point `p` to the view point `p * zoom + pan`. Use `canvasPoint(fromView:)` to convert in the other direction. Mouse movement from gestures is in screen points: divide it by `zoom` before you apply it to a card.
 - **Card sizes.** `CardLayout` holds all card sizes. The view and the model both use it. The model must know row positions to place child cards and to draw connector lines. If you change the card layout in the view, change `CardLayout` too.
@@ -54,10 +56,20 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - When you hold the Control key and move the cursor, the canvas moves with the cursor. This works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
 - The dot grid moves and scales with the canvas. When the dots are too close together, they are hidden.
 
+### Workspaces
+
+- The window has a sidebar with a "Workspaces" section. Each workspace is a separate canvas with its own cards, zoom and pan.
+- A click on a workspace shows its canvas. The window title is the workspace name.
+- "New Workspace" adds an empty workspace with the next free name "Workspace N", selects it and starts the rename.
+- A double-click on a workspace (or "Rename" in the context menu) starts the rename. Return or a click outside keeps the new name. Escape cancels. A name with only spaces is ignored.
+- The × button on the selected workspace (or "Delete" in the context menu) deletes it. If the workspace has cards, the app asks for confirmation first. The folders on disk do not change.
+- There is always at least one workspace. The last workspace cannot be deleted.
+
 ### Save and restore
 
-- The app has one window, so there is one canvas.
-- When the app quits, it saves the open cards (root and child cards), their positions, their sizes, their view modes, and the zoom and pan. The file is `~/Library/Application Support/Overscape/canvas.json`.
+- The app has one window, so there is one set of workspaces.
+- When the app quits, it saves all workspaces (their names, the selected workspace, and for each workspace the open cards (root and child cards), their positions, their sizes, their view modes, and the zoom and pan). The file is `~/Library/Application Support/Overscape/workspaces.json`.
+- If there is no `workspaces.json`, the app reads `canvas.json` from a version without workspaces into the first workspace. The app does not change or delete `canvas.json`.
 - At the start, the app restores the saved canvas. It reads the file lists from disk again.
 - If a saved folder does not exist, its card and all cards opened from it are not restored.
 - The app saves only on a normal quit. A crash or a force quit loses the changes since the last start.
