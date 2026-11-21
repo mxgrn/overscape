@@ -138,7 +138,7 @@ struct FolderCardView: View {
     /// Icon mode. Icons with an open child card are not highlighted, only the selected icon.
     private var grid: some View {
         let columns = Array(
-            repeating: GridItem(.fixed(CardLayout.iconCellWidth(width: card.width)), spacing: 0),
+            repeating: GridItem(.fixed(card.iconCellWidth), spacing: 0),
             count: card.iconColumns
         )
         return ScrollView {
@@ -148,7 +148,7 @@ struct FolderCardView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: CardLayout.iconCellHeight)
+                        .frame(height: card.iconCellHeight)
                 } else {
                     LazyVGrid(columns: columns, spacing: 0) {
                         ForEach(card.entries) { entry in
@@ -175,7 +175,7 @@ struct FolderCardView: View {
     private func iconCell(_ entry: FileEntry) -> some View {
         let isSelected = isSelected(entry)
         return VStack(spacing: 4) {
-            ItemThumbnail(entry: entry)
+            ItemThumbnail(entry: entry, iconSize: card.iconSize)
                 .padding(3)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
@@ -202,7 +202,7 @@ struct FolderCardView: View {
             }
         }
         .padding(.top, 4)
-        .frame(width: CardLayout.iconCellWidth(width: card.width), height: CardLayout.iconCellHeight, alignment: .top)
+        .frame(width: card.iconCellWidth, height: card.iconCellHeight, alignment: .top)
         .contentShape(Rectangle())
         .onTapGesture { model.select(entry.url, in: card.id) }
         .simultaneousGesture(TapGesture(count: 2).onEnded { open(entry) })
@@ -368,22 +368,24 @@ private extension View {
 /// The item shows its icon until the thumbnail is ready, and when there is no thumbnail.
 private struct ItemThumbnail: View {
     let entry: FileEntry
+    let iconSize: CGFloat
 
     @Environment(\.displayScale) private var displayScale
+    /// The last thumbnail that was made. It shows while a thumbnail of a different size is made.
     @State private var thumbnail: NSImage?
 
     var body: some View {
+        let request = ThumbnailLoader.Request(entry: entry, iconSize: iconSize)
         // A cell that comes into view again gets its thumbnail from the cache, without a flash of the icon.
-        Image(nsImage: thumbnail ?? ThumbnailLoader.cached(entry) ?? NSWorkspace.shared.icon(forFile: entry.url.path))
+        Image(nsImage: ThumbnailLoader.cached(request) ?? thumbnail ?? NSWorkspace.shared.icon(forFile: entry.url.path))
             .resizable()
             .scaledToFit()
-            .frame(width: CardLayout.iconSize, height: CardLayout.iconSize)
-            // A changed file gets a new thumbnail.
-            .task(id: entry) {
+            .frame(width: iconSize, height: iconSize)
+            // A changed file gets a new thumbnail. A much larger icon gets a larger thumbnail.
+            .task(id: request) {
                 // The thumbnail has sufficient pixels for the largest zoom of the canvas.
                 thumbnail = await ThumbnailLoader.thumbnail(
-                    for: entry, size: CardLayout.iconSize,
-                    scale: displayScale * CanvasModel.zoomRange.upperBound
+                    for: request, scale: displayScale * CanvasModel.zoomRange.upperBound
                 )
             }
     }

@@ -30,6 +30,8 @@ struct FolderCard: Identifiable {
     /// How far the file list is scrolled (0 or negative), in canvas points.
     var scrollOffset: CGFloat = 0
     var viewMode: CardViewMode = .list
+    /// Icon mode: the size of one icon. A pinch on the card changes it.
+    var iconSize: CGFloat = CardLayout.defaultIconSize
     var width: CGFloat = CardLayout.defaultWidth
     /// Nil means that the height comes from the content. When the user resizes the card
     /// vertically, the card gets a fixed height.
@@ -37,14 +39,18 @@ struct FolderCard: Identifiable {
 
     func itemCenterY(index: Int) -> CGFloat {
         CardLayout.itemCenterY(
-            index: index, mode: viewMode, iconColumns: iconColumns,
+            index: index, mode: viewMode, iconColumns: iconColumns, iconSize: iconSize,
             contentHeight: contentHeight, scrollOffset: scrollOffset
         )
     }
 
     var title: String { url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent }
-    var iconColumns: Int { CardLayout.iconColumns(width: width) }
-    var height: CGFloat { fixedHeight ?? CardLayout.height(entryCount: entries.count, mode: viewMode, width: width) }
+    var iconColumns: Int { CardLayout.iconColumns(width: width, iconSize: iconSize) }
+    var iconCellWidth: CGFloat { CardLayout.iconCellWidth(width: width, iconSize: iconSize) }
+    var iconCellHeight: CGFloat { CardLayout.iconCellHeight(iconSize: iconSize) }
+    var height: CGFloat {
+        fixedHeight ?? CardLayout.height(entryCount: entries.count, mode: viewMode, width: width, iconSize: iconSize)
+    }
     /// The height of the item area (the list or the icon grid).
     var contentHeight: CGFloat { height - CardLayout.contentTop(mode: viewMode) }
     var frame: CGRect { CGRect(origin: position, size: CGSize(width: width, height: height)) }
@@ -81,20 +87,28 @@ enum CardLayout {
     /// The size of the area at a corner that resizes the card.
     static let resizeCornerSize: CGFloat = 16
 
-    /// Icon mode: the size of one icon, as in Finder.
-    static let iconSize: CGFloat = 64
-    /// Icon mode: the minimum width of one cell. The card width sets the number of columns.
-    static let iconMinCellWidth: CGFloat = 110
+    /// Icon mode: the size of one icon at the start, as in Finder.
+    static let defaultIconSize: CGFloat = 64
+    /// Icon mode: the sizes that an icon can have.
+    static let iconSizeRange: ClosedRange<CGFloat> = 32...256
     static let gridPadding: CGFloat = 10
-    /// Icon mode: the height of one cell (icon, space and a name of two lines).
-    static let iconCellHeight: CGFloat = 108
 
-    static func iconColumns(width: CGFloat) -> Int {
-        max(1, Int((width - 2 * gridPadding) / iconMinCellWidth))
+    /// Icon mode: the minimum width of one cell. The card width sets the number of columns.
+    static func iconMinCellWidth(iconSize: CGFloat = defaultIconSize) -> CGFloat {
+        iconSize + 46
     }
 
-    static func iconCellWidth(width: CGFloat) -> CGFloat {
-        (width - 2 * gridPadding) / CGFloat(iconColumns(width: width))
+    /// Icon mode: the height of one cell (icon, space and a name of two lines).
+    static func iconCellHeight(iconSize: CGFloat = defaultIconSize) -> CGFloat {
+        iconSize + 44
+    }
+
+    static func iconColumns(width: CGFloat, iconSize: CGFloat = defaultIconSize) -> Int {
+        max(1, Int((width - 2 * gridPadding) / iconMinCellWidth(iconSize: iconSize)))
+    }
+
+    static func iconCellWidth(width: CGFloat, iconSize: CGFloat = defaultIconSize) -> CGFloat {
+        (width - 2 * gridPadding) / CGFloat(iconColumns(width: width, iconSize: iconSize))
     }
 
     static var listTop: CGFloat { headerHeight + dividerHeight + columnHeaderHeight + dividerHeight }
@@ -115,45 +129,53 @@ enum CardLayout {
         (max(entryCount, 1) + columns - 1) / columns
     }
 
-    static func gridHeight(entryCount: Int, width: CGFloat) -> CGFloat {
-        let rows = iconRowCount(entryCount: entryCount, columns: iconColumns(width: width))
-        return min(CGFloat(rows) * iconCellHeight + 2 * gridPadding, maxListHeight)
+    static func gridHeight(entryCount: Int, width: CGFloat, iconSize: CGFloat = defaultIconSize) -> CGFloat {
+        let rows = iconRowCount(entryCount: entryCount, columns: iconColumns(width: width, iconSize: iconSize))
+        return min(CGFloat(rows) * iconCellHeight(iconSize: iconSize) + 2 * gridPadding, maxListHeight)
     }
 
     /// The height of the item area when the height comes from the content.
     /// The item area scrolls when the items need more space.
-    static func contentHeight(entryCount: Int, mode: CardViewMode, width: CGFloat) -> CGFloat {
+    static func contentHeight(
+        entryCount: Int, mode: CardViewMode, width: CGFloat, iconSize: CGFloat = defaultIconSize
+    ) -> CGFloat {
         switch mode {
         case .list: listHeight(entryCount: entryCount)
-        case .icons: gridHeight(entryCount: entryCount, width: width)
+        case .icons: gridHeight(entryCount: entryCount, width: width, iconSize: iconSize)
         }
     }
 
     /// The card height when the height comes from the content.
-    static func height(entryCount: Int, mode: CardViewMode = .list, width: CGFloat = defaultWidth) -> CGFloat {
-        contentTop(mode: mode) + contentHeight(entryCount: entryCount, mode: mode, width: width)
+    static func height(
+        entryCount: Int, mode: CardViewMode = .list, width: CGFloat = defaultWidth, iconSize: CGFloat = defaultIconSize
+    ) -> CGFloat {
+        contentTop(mode: mode) + contentHeight(entryCount: entryCount, mode: mode, width: width, iconSize: iconSize)
     }
 
     /// The vertical center of an item (a row or an icon cell), from the top of the card.
     /// When the item is scrolled out of view, the value stops at the top or bottom edge of the item area.
     static func itemCenterY(
-        index: Int, mode: CardViewMode, iconColumns: Int, contentHeight: CGFloat, scrollOffset: CGFloat
+        index: Int, mode: CardViewMode, iconColumns: Int, iconSize: CGFloat = defaultIconSize,
+        contentHeight: CGFloat, scrollOffset: CGFloat
     ) -> CGFloat {
         let top = contentTop(mode: mode)
-        let range = itemRange(index: index, mode: mode, iconColumns: iconColumns)
+        let range = itemRange(index: index, mode: mode, iconColumns: iconColumns, iconSize: iconSize)
         let y = top + scrollOffset + (range.lowerBound + range.upperBound) / 2
         return min(max(y, top), top + contentHeight)
     }
 
     /// The top and the bottom of an item (a row or an icon cell), from the top of the items.
-    static func itemRange(index: Int, mode: CardViewMode, iconColumns: Int) -> ClosedRange<CGFloat> {
+    static func itemRange(
+        index: Int, mode: CardViewMode, iconColumns: Int, iconSize: CGFloat = defaultIconSize
+    ) -> ClosedRange<CGFloat> {
         switch mode {
         case .list:
             let top = CGFloat(index) * rowHeight
             return top...(top + rowHeight)
         case .icons:
-            let top = gridPadding + CGFloat(index / iconColumns) * iconCellHeight
-            return top...(top + iconCellHeight)
+            let cellHeight = iconCellHeight(iconSize: iconSize)
+            let top = gridPadding + CGFloat(index / iconColumns) * cellHeight
+            return top...(top + cellHeight)
         }
     }
 
@@ -161,13 +183,21 @@ enum CardLayout {
     /// Nil when the item is fully in view. A difference of less than 1 point is ignored,
     /// because the scroll offset is not always a full number when the canvas has a zoom.
     static func scrollEdge(
-        index: Int, mode: CardViewMode, iconColumns: Int, contentHeight: CGFloat, scrollOffset: CGFloat
+        index: Int, mode: CardViewMode, iconColumns: Int, iconSize: CGFloat = defaultIconSize,
+        contentHeight: CGFloat, scrollOffset: CGFloat
     ) -> ScrollEdge? {
-        let range = itemRange(index: index, mode: mode, iconColumns: iconColumns)
+        let range = itemRange(index: index, mode: mode, iconColumns: iconColumns, iconSize: iconSize)
         if range.lowerBound + scrollOffset < -1 { return .top }
         if range.upperBound + scrollOffset > contentHeight + 1 { return .bottom }
         return nil
     }
+}
+
+/// What a pinch changes. The model makes the decision at the start of the pinch.
+enum PinchTarget {
+    case canvas
+    case iconSize(FolderCard.ID)
+    case nothing
 }
 
 /// An edge of the item area of a card.
@@ -233,6 +263,8 @@ struct CanvasSnapshot: Codable, Equatable {
         var width: CGFloat? = nil
         /// Nil means that the height comes from the content.
         var height: CGFloat? = nil
+        /// Nil in files from versions without icon sizes. Nil means the default icon size.
+        var iconSize: CGFloat? = nil
     }
 
     var cards: [Card]
@@ -344,6 +376,8 @@ final class CanvasModel {
     @ObservationIgnored var viewSize: CGSize = .zero
     /// True when the current two-finger scroll pans the canvas.
     private(set) var isScrollPanning = false
+    /// What the current pinch changes.
+    private var pinchTarget = PinchTarget.canvas
 
     static let zoomRange: ClosedRange<CGFloat> = 0.25...3
 
@@ -352,7 +386,7 @@ final class CanvasModel {
             cards: cards.map {
                 .init(
                     id: $0.id, path: $0.url.path, x: $0.position.x, y: $0.position.y, parentID: $0.parentID,
-                    viewMode: $0.viewMode, width: $0.width, height: $0.fixedHeight
+                    viewMode: $0.viewMode, width: $0.width, height: $0.fixedHeight, iconSize: $0.iconSize
                 )
             },
             zoom: zoom,
@@ -386,6 +420,7 @@ final class CanvasModel {
                 entries: FolderLoader.entries(in: url),
                 parentID: card.parentID,
                 viewMode: card.viewMode ?? .list,
+                iconSize: Self.iconSize(inRange: card.iconSize ?? CardLayout.defaultIconSize),
                 width: max(card.width ?? CardLayout.defaultWidth, CardLayout.minWidth),
                 fixedHeight: card.height.map { max($0, CardLayout.minHeight) }
             )
@@ -403,6 +438,35 @@ final class CanvasModel {
             height: anchor.y - (anchor.y - pan.height) * ratio
         )
         zoom = newZoom
+    }
+
+    /// Starts a pinch. The pinch changes the icon size of the card under the cursor, if that card
+    /// is in icon mode. On a card in list mode, the pinch does nothing. On empty canvas, and
+    /// always with the Control key, the pinch changes the zoom of the canvas.
+    /// The decision stays until the pinch ends, also when the card moves away from the cursor.
+    func beginPinch(withControl: Bool) {
+        if !withControl, let card = cards.first(where: { $0.id == hoveredCardID }) {
+            pinchTarget = card.viewMode == .icons ? .iconSize(card.id) : .nothing
+        } else {
+            pinchTarget = .canvas
+        }
+    }
+
+    /// Continues the pinch by `factor`. `anchor` is the cursor position (view coordinates).
+    func pinch(by factor: CGFloat, around anchor: CGPoint) {
+        switch pinchTarget {
+        case .canvas:
+            zoom(by: factor, around: anchor)
+        case .iconSize(let id):
+            guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+            cards[index].iconSize = Self.iconSize(inRange: cards[index].iconSize * factor)
+        case .nothing:
+            break
+        }
+    }
+
+    private static func iconSize(inRange size: CGFloat) -> CGFloat {
+        min(max(size, CardLayout.iconSizeRange.lowerBound), CardLayout.iconSizeRange.upperBound)
     }
 
     func pan(by delta: CGSize) {
@@ -767,7 +831,7 @@ final class CanvasModel {
               let index = card.entries.firstIndex(where: { $0.url == item.url })
         else { return nil }
         return CardLayout.scrollEdge(
-            index: index, mode: card.viewMode, iconColumns: card.iconColumns,
+            index: index, mode: card.viewMode, iconColumns: card.iconColumns, iconSize: card.iconSize,
             contentHeight: card.contentHeight, scrollOffset: card.scrollOffset
         )
     }

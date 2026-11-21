@@ -3,7 +3,7 @@ import Quartz
 import SwiftUI
 
 /// An AppKit view behind the cards that turns raw input into canvas navigation:
-/// - pinch anywhere in the canvas zooms around the cursor,
+/// - a pinch zooms around the cursor, or changes the icon size of the card under the cursor,
 /// - a mouse drag on empty canvas pans,
 /// - a two-finger scroll that starts on empty canvas pans,
 /// - a two-finger scroll with the Control key pans, also when it starts on a card,
@@ -17,6 +17,8 @@ struct CanvasEventView: NSViewRepresentable {
     var onScrollBegan: (CGPoint?, Bool) -> Void
     /// Returns false when the scroll does not pan the canvas. The event then continues.
     var onScroll: (CGSize) -> Bool
+    /// The start of a pinch, with the state of the Control key.
+    var onMagnifyBegan: (Bool) -> Void
     var onMagnify: (_ factor: CGFloat, _ location: CGPoint) -> Void
     /// A mouse click on empty canvas.
     var onMouseDown: () -> Void
@@ -28,6 +30,7 @@ struct CanvasEventView: NSViewRepresentable {
         view.onPan = onPan
         view.onScrollBegan = onScrollBegan
         view.onScroll = onScroll
+        view.onMagnifyBegan = onMagnifyBegan
         view.onMagnify = onMagnify
         view.onMouseDown = onMouseDown
         view.onCommand = onCommand
@@ -38,6 +41,7 @@ struct CanvasEventView: NSViewRepresentable {
         view.onPan = onPan
         view.onScrollBegan = onScrollBegan
         view.onScroll = onScroll
+        view.onMagnifyBegan = onMagnifyBegan
         view.onMagnify = onMagnify
         view.onMouseDown = onMouseDown
         view.onCommand = onCommand
@@ -47,6 +51,7 @@ struct CanvasEventView: NSViewRepresentable {
         var onPan: (CGSize) -> Void = { _ in }
         var onScrollBegan: (CGPoint?, Bool) -> Void = { _, _ in }
         var onScroll: (CGSize) -> Bool = { _ in false }
+        var onMagnifyBegan: (Bool) -> Void = { _ in }
         var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
         var onMouseDown: () -> Void = {}
         var onCommand: (CanvasCommand) -> Bool = { _ in false }
@@ -61,11 +66,15 @@ struct CanvasEventView: NSViewRepresentable {
             removeMonitor()
             guard window != nil else { return }
             // A pinch over a card goes to the card's scroll view, not to this view.
-            // A local monitor sees every pinch in the window, so the zoom works everywhere.
+            // A local monitor sees every pinch in the window, so the pinch works everywhere.
             magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
                 guard let self, event.window === self.window else { return event }
                 let location = self.convert(event.locationInWindow, from: nil)
                 guard self.bounds.contains(location) else { return event }
+                // The decision from the start of the pinch stays until the pinch ends.
+                if event.phase.contains(.began) {
+                    self.onMagnifyBegan(event.modifierFlags.contains(.control))
+                }
                 self.onMagnify(1 + event.magnification, location)
                 return nil
             }

@@ -27,7 +27,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | File | Purpose |
 | --- | --- |
 | `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon (`AppIcon`). It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
-| `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `ItemRef`, `CanvasCommand`, `UndoStep`, `CanvasModel`. |
+| `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `PinchTarget`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `ItemRef`, `CanvasCommand`, `UndoStep`, `CanvasModel`. |
 | `Sources/Overscape/FileOperations.swift` | `FileOperations` (copy, move and Trash on disk, free names, the volume check) and `FolderWatcher` (reports changes in a folder). |
 | `Sources/Overscape/ThumbnailLoader.swift` | `ThumbnailLoader`: makes and keeps the thumbnails of files for icon mode. |
 | `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel` and its own favorites. |
@@ -58,7 +58,10 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 
 - At the start, the canvas is empty and shows a dot grid with the text "Drag a folder here".
 - A drop of one or more folders makes one card for each folder, near the cursor. Items that are not folders are ignored.
-- A trackpad pinch zooms from 25% to 300%. The point under the cursor stays in place. Pinch works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
+- A trackpad pinch on empty canvas zooms from 25% to 300%. The point under the cursor stays in place. A local `NSEvent` monitor catches the pinch everywhere in the window, also on top of a card.
+- A pinch with the Control key zooms the canvas also when the cursor is on a card.
+- A pinch without the Control key on a card does not zoom the canvas. In icon mode, it changes the icon size of the card (see "View modes"). In list mode, it does nothing.
+- The model makes the decision at the start of each pinch (`beginPinch`), from the card under the cursor (`hoveredCardID`) and the state of the Control key. The decision stays until the pinch ends.
 - A drag on empty canvas moves (pans) the canvas.
 - A two-finger scroll that starts on empty canvas moves (pans) the canvas. The pan continues until the scroll and its momentum end, also when a card moves below the cursor. A local `NSEvent` monitor catches it.
 - A two-finger scroll that starts on a card does not pan the canvas. It scrolls the file list of that card. The model makes this decision at the start of each scroll (`beginScroll`), from the card frames.
@@ -89,7 +92,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 ### Save and restore
 
 - The app has one window, so there is one set of workspaces.
-- When the app quits, it saves all workspaces (their names, the selected workspace, and for each workspace the favorites, the open cards (root and child cards), their positions, their sizes, their view modes, and the zoom and pan). The file is `~/Library/Application Support/Overscape/workspaces.json`.
+- When the app quits, it saves all workspaces (their names, the selected workspace, and for each workspace the favorites, the open cards (root and child cards), their positions, their sizes, their view modes, their icon sizes, and the zoom and pan). The file is `~/Library/Application Support/Overscape/workspaces.json`.
 - If there is no `workspaces.json`, the app reads `canvas.json` from a version without workspaces into the first workspace. The app does not change or delete `canvas.json`.
 - At the start, the app restores the saved canvas. It reads the file lists from disk again.
 - If a saved folder does not exist, its card and all cards opened from it are not restored.
@@ -97,6 +100,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - The scroll offset of the file lists and the selected rows are not saved.
 - A saved file from a version without favorites restores each workspace with the standard favorites.
 - A saved file from a version without view modes restores all cards in list mode.
+- A saved file from a version without icon sizes restores all cards with the default icon size.
 - A saved file from a version without resize restores all cards with the default width and the height from the content.
 
 ### Cards
@@ -151,15 +155,17 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - The resize area is half inside and half outside the card border.
 - A card cannot become smaller than `CardLayout.minWidth` and `CardLayout.minHeight`.
 - At the start, the height of a card comes from its content. When you move the top or the bottom edge, or when the card shows a different folder, the card gets a fixed height. If the content is shorter, the card shows empty space. If the content is taller, the list scrolls. A change of the width only keeps the height from the content.
-- In icon mode, the number of icons on each line changes with the card width. Each cell is at least `CardLayout.iconMinCellWidth` wide.
+- In icon mode, the number of icons on each line changes with the card width. Each cell is at least `CardLayout.iconMinCellWidth(iconSize:)` wide.
 - A resize does not move the child cards.
 
 ### View modes
 
 - A card has two view modes, as in Finder: list (the default) and icons.
 - Command-1 sets icon mode and Command-2 sets list mode for the card under the cursor. The model knows this card (`hoveredCardID`). If no card is under the cursor, the keys do nothing. A local `NSEvent` monitor catches the keys.
-- Icon mode shows a grid of 64-point icons with the names below. With the default width, there are 4 icons on each line. It has no column headers. The card keeps its width. The grid scrolls when it is taller than `CardLayout.maxListHeight`.
+- Icon mode shows a grid of icons with the names below. The default icon size is 64 points. With the default width and the default icon size, there are 4 icons on each line. It has no column headers. The card keeps its width. The grid scrolls when it is taller than `CardLayout.maxListHeight`.
 - In icon mode, a file shows a thumbnail of its content in place of its icon, as in Finder (`ThumbnailLoader`). This applies to each file for which macOS can make a thumbnail (images, PDF files and videos, for example). The thumbnail is a static picture: a GIF file does not play. The thumbnail keeps the proportions of the picture. A file shows its icon until the thumbnail is ready. Folders, packages and files without a thumbnail keep their icons. List mode shows only icons.
+- A pinch on a card in icon mode changes the icon size of that card, from 32 to 256 points (`CardLayout.iconSizeRange`). Each card has its own icon size (`iconSize`). The cell size and the number of icons on each line change with the icon size. The name below the icon keeps its text size. The size stays when the card changes to list mode and back.
+- The thumbnails have 3 sizes: 64, 128 and 256 points (`ThumbnailLoader.Request`). An icon uses the smallest thumbnail that is not smaller than the icon. The old thumbnail shows until the larger thumbnail is ready.
 - In icon mode, a single click selects an icon. A double-click does the same as in list mode. Icons that have an open child card are not highlighted.
 - In icon mode, the connector line starts at the right edge of the card, level with the line of icons.
 
@@ -196,7 +202,7 @@ A double-click operates as in Finder.
 
 - It is not decided if closing a card must also close its child cards. At the moment, it closes the child cards that have a line.
 - The restore does not use the line rule. If a saved folder does not exist, all cards opened from its card are not restored, also the cards that had no line.
-- When a card changes its view mode, its height changes (if it has no fixed height). A resize also changes the height. Its child cards do not move, so they can overlap or the lines can cross.
+- When a card changes its view mode or its icon size, its height changes (if it has no fixed height). A resize also changes the height. Its child cards do not move, so they can overlap or the lines can cross.
 - When sibling cards move down, the cards opened from them do not move. Lines further down the tree can then cross.
 - Child card order uses the row order, not the current card positions. If you drag a child card out of order, a new card can overlap it.
 - When the number of items in a card changes (a file operation or a live update), its height changes (if it has no fixed height). The other cards do not move, so cards can overlap.

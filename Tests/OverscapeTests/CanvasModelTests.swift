@@ -138,6 +138,8 @@ struct CanvasModelTests {
         model.zoom(by: 2, around: CGPoint(x: 10, y: 20))
         model.setHovered(model.cards[0].id, true)
         model.setViewModeOfHoveredCard(.icons)
+        model.beginPinch(withControl: false)
+        model.pinch(by: 2, around: .zero)
         model.resize(model.cards[1].id, edges: .bottom, from: model.cards[1].frame, by: CGSize(width: 0, height: 200))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -149,6 +151,7 @@ struct CanvasModelTests {
         #expect(restored.snapshot == model.snapshot)
         #expect(restored.connections.count == 1)
         #expect(restored.cards[0].viewMode == .icons)
+        #expect(restored.cards[0].iconSize == 128)
         #expect(restored.cards[1].frame == model.cards[1].frame)
     }
 
@@ -164,6 +167,7 @@ struct CanvasModelTests {
         model.restore(snapshot)
 
         #expect(model.cards.map(\.viewMode) == [.list])
+        #expect(model.cards[0].iconSize == CardLayout.defaultIconSize)
         #expect(model.cards[0].width == CardLayout.defaultWidth)
         #expect(model.cards[0].fixedHeight == nil)
     }
@@ -207,7 +211,7 @@ struct CanvasModelTests {
         #expect(model.cards[0].iconColumns == 4)
 
         // 5 icons on one grid line need 5 cells of the minimum width.
-        let width = 5 * CardLayout.iconMinCellWidth + 2 * CardLayout.gridPadding
+        let width = 5 * CardLayout.iconMinCellWidth() + 2 * CardLayout.gridPadding
         model.resize(model.cards[0].id, edges: .right, from: model.cards[0].frame,
                      by: CGSize(width: width - CardLayout.defaultWidth, height: 0))
 
@@ -228,6 +232,51 @@ struct CanvasModelTests {
 
         #expect(model.cards[1].position.x == model.cards[0].width + CardLayout.childSpacing)
         #expect(model.connections.map(\.start.x) == [model.cards[0].width])
+    }
+
+    @Test func aPinchChangesTheIconSizeOfTheCardUnderTheCursorInIconMode() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let id = model.cards[0].id
+        model.setHovered(id, true)
+
+        // In list mode, the pinch does nothing.
+        model.beginPinch(withControl: false)
+        model.pinch(by: 2, around: .zero)
+        #expect(model.cards[0].iconSize == 64)
+
+        model.setViewModeOfHoveredCard(.icons)
+        model.beginPinch(withControl: false)
+        model.pinch(by: 2, around: .zero)
+        #expect(model.cards[0].iconSize == 128)
+        #expect(model.cards[0].iconColumns == 2)
+        #expect(model.cards[0].height == CardLayout.height(entryCount: 1, mode: .icons, iconSize: 128))
+
+        // The pinch continues on the card when the cursor is not on the card now.
+        model.setHovered(id, false)
+        model.pinch(by: 100, around: .zero)
+        #expect(model.cards[0].iconSize == CardLayout.iconSizeRange.upperBound)
+        #expect(model.zoom == 1)
+    }
+
+    @Test func aPinchOnEmptyCanvasOrWithControlZoomsTheCanvas() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+
+        model.beginPinch(withControl: false)
+        model.pinch(by: 2, around: .zero)
+        #expect(model.zoom == 2)
+
+        model.setHovered(model.cards[0].id, true)
+        model.setViewModeOfHoveredCard(.icons)
+        model.beginPinch(withControl: true)
+        model.pinch(by: 0.5, around: .zero)
+        #expect(model.zoom == 1)
+        #expect(model.cards[0].iconSize == CardLayout.defaultIconSize)
     }
 
     @Test func viewModeKeysChangeOnlyTheHoveredCard() throws {
@@ -262,7 +311,7 @@ struct CanvasModelTests {
         // With 4 icons on each grid line, the fifth item is on the second line.
         model.openChild(of: parent.id, folder: parent.entries[4].url)
 
-        let expectedY = 50 + CardLayout.contentTop(mode: .icons) + CardLayout.gridPadding + 1.5 * CardLayout.iconCellHeight
+        let expectedY = 50 + CardLayout.contentTop(mode: .icons) + CardLayout.gridPadding + 1.5 * CardLayout.iconCellHeight()
         #expect(model.connections.map(\.start.y) == [expectedY])
     }
 
