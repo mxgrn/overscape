@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -19,7 +20,8 @@ enum CardViewMode: String, Codable {
 
 struct FolderCard: Identifiable {
     var id = UUID()
-    let url: URL
+    /// The folder of the card. It changes when the folder gets a new name.
+    var url: URL
     var position: CGPoint
     var entries: [FileEntry]
     /// The card that this card was opened from. Nil for a dropped folder.
@@ -226,12 +228,57 @@ enum SnapshotStore {
     }
 }
 
+/// An item (a file or a folder) in a card.
+struct ItemRef: Hashable {
+    let cardID: FolderCard.ID
+    let url: URL
+}
+
+/// How items go into a folder.
+enum TransferKind {
+    case move
+    case copy
+}
+
+/// A keyboard command for the canvas.
+enum CanvasCommand: Equatable {
+    case viewMode(CardViewMode)
+    case rename
+    case moveToTrash
+    case copy
+    case paste
+    case pasteAndMove
+    case undo
+}
+
+/// A file operation that `undo` can reverse.
+enum UndoStep {
+    case rename(from: URL, to: URL)
+    case move([(from: URL, to: URL)])
+    case copy([URL])
+    case trash(original: URL, trashed: URL)
+}
+
 @MainActor
 @Observable
 final class CanvasModel {
     var cards: [FolderCard] = []
     /// The card under the cursor. Keyboard commands for a card go to this card.
     private(set) var hoveredCardID: FolderCard.ID?
+
+    /// The selected item. The canvas has not more than one selected item.
+    private(set) var selection: ItemRef?
+    /// The item that the user renames at this time.
+    private(set) var renaming: ItemRef?
+    /// The text in the name field during a rename.
+    var renameDraft = ""
+    /// The message of the last file operation that failed. The view shows it in an alert.
+    var errorMessage: String?
+    /// Copy and paste use this pasteboard. Tests set a different pasteboard.
+    @ObservationIgnored var pasteboard: NSPasteboard = .general
+    /// Moves an item to the Trash. Tests set a different function to keep the Trash clean.
+    @ObservationIgnored var trash: (URL) throws -> URL? = FileOperations.trash
+    @ObservationIgnored private var undoSteps: [UndoStep] = []
 
     /// Viewport: a canvas point `p` shows at `p * zoom + pan` in the view.
     var zoom: CGFloat = 1
@@ -492,5 +539,232 @@ final class CanvasModel {
         if let hoveredCardID, closing.contains(hoveredCardID) {
             self.hoveredCardID = nil
         }
+        if let selection, closing.contains(selection.cardID) {
+            self.selection = nil
+        }
+        if let renaming, closing.contains(renaming.cardID) {
+            self.renaming = nil
+        }
+    }
+
+    // MARK: - Selection
+
+    /// Selects an item. A rename of a different item ends and keeps the new name.
+    func select(_ url: URL, in cardID: FolderCard.ID) {
+        let item = ItemRef(cardID: cardID, url: url)
+        if renaming != item { commitRename() }
+        selection = item
+    }
+
+    /// Removes the selection. A rename ends and keeps the new name.
+    func clearSelection() {
+        commitRename()
+        selection = nil
+    }
+
+    private func isShown(_ item: ItemRef) -> Bool {
+        cards.first { $0.id == item.cardID }?.entries.contains { $0.url == item.url } ?? false
+    }
+
+    private func select(itemNamed name: String, in cardID: FolderCard.ID) {
+        let entry = cards.first { $0.id == cardID }?.entries.first { $0.url.lastPathComponent == name }
+        selection = entry.map { ItemRef(cardID: cardID, url: $0.url) }
+    }
+
+    // MARK: - File operations
+
+    /// Does the keyboard command. Returns false when the command had no effect.
+    @discardableResult
+    func perform(_ command: CanvasCommand) -> Bool {
+        switch command {
+        case .viewMode(let mode): setViewModeOfHoveredCard(mode)
+        case .rename: beginRename()
+        case .moveToTrash: trashSelection()
+        case .copy: copySelection()
+        case .paste: paste()
+        case .pasteAndMove: paste(move: true)
+        case .undo: undo()
+        }
+    }
+
+    /// Reads the file lists of all cards from disk again. A card whose folder does not exist closes.
+    /// A child card whose folder is not in the parent card closes. The cards opened from a closed card also close.
+    func reload() {
+        for index in cards.indices {
+            let entries = FolderLoader.entries(in: cards[index].url)
+            if entries != cards[index].entries { cards[index].entries = entries }
+        }
+        let stale = cards.filter { card in
+            if !FolderLoader.isDirectory(card.url) { return true }
+            guard let parent = cards.first(where: { $0.id == card.parentID }) else { return false }
+            return !parent.entries.contains { $0.url == card.url }
+        }
+        for card in stale { close(card.id) }
+        if let selection, !isShown(selection) { self.selection = nil }
+        if let renaming, !isShown(renaming) { self.renaming = nil }
+    }
+
+    /// Does a file operation. When it fails, the view gets the error message and the result is false.
+    @discardableResult
+    private func attempt(_ operation: () throws -> Void) -> Bool {
+        do {
+            try operation()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Starts the rename of the selected item. Returns false when no item is selected.
+    @discardableResult
+    func beginRename() -> Bool {
+        guard let selection, isShown(selection) else { return false }
+        renaming = selection
+        renameDraft = selection.url.lastPathComponent
+        return true
+    }
+
+    /// Ends the rename and does not change the name.
+    func cancelRename() {
+        renaming = nil
+    }
+
+    /// Ends the rename and gives the item the name from the name field.
+    func commitRename() {
+        guard let item = renaming else { return }
+        renaming = nil
+        rename(item, to: renameDraft)
+    }
+
+    /// Changes the name of an item on disk. A name with only spaces is ignored.
+    /// The open cards for a renamed folder, and for the folders in it, stay open.
+    func rename(_ item: ItemRef, to newName: String) {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != item.url.lastPathComponent else { return }
+        guard !name.hasPrefix("."), !name.contains("/") else {
+            errorMessage = "The name “\(name)” is not permitted. A name cannot start with a dot or contain a slash."
+            return
+        }
+        let target = item.url.deletingLastPathComponent().appendingPathComponent(name)
+        do {
+            try FileManager.default.moveItem(at: item.url, to: target)
+        } catch CocoaError.fileWriteFileExists {
+            errorMessage = "The name “\(name)” is already taken. Use a different name."
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        undoSteps.append(.rename(from: item.url, to: target))
+        moveCards(from: item.url, to: target)
+        reload()
+        select(itemNamed: name, in: item.cardID)
+    }
+
+    /// Gives the cards for a renamed folder, and for the folders in it, their new URLs.
+    private func moveCards(from old: URL, to new: URL) {
+        for index in cards.indices {
+            let path = cards[index].url.path
+            if path == old.path || path.hasPrefix(old.path + "/") {
+                cards[index].url = URL(fileURLWithPath: new.path + path.dropFirst(old.path.count))
+            }
+        }
+    }
+
+    /// Moves the selected item to the Trash. Returns false when no item is selected.
+    @discardableResult
+    func trashSelection() -> Bool {
+        guard let item = selection else { return false }
+        var trashed: URL?
+        if attempt({ trashed = try trash(item.url) }), let trashed {
+            undoSteps.append(.trash(original: item.url, trashed: trashed))
+        }
+        reload()
+        return true
+    }
+
+    /// Puts the selected item on the pasteboard. Returns false when no item is selected.
+    @discardableResult
+    func copySelection() -> Bool {
+        guard let item = selection else { return false }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item.url as NSURL])
+        return true
+    }
+
+    /// Copies (or moves) the files on the pasteboard into the folder of the card under the cursor.
+    /// Returns false when no item went into the folder.
+    @discardableResult
+    func paste(move: Bool = false) -> Bool {
+        guard let cardID = hoveredCardID else { return false }
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return transfer(urls as? [URL] ?? [], to: cardID, kind: move ? .move : .copy)
+    }
+
+    /// The Finder rule for a drop on a card: a move on the same volume and a copy between different volumes.
+    /// With the Option key, a drop always makes a copy. Nil means that the card cannot get the items.
+    func dropKind(for urls: [URL], on cardID: FolderCard.ID, optionKey: Bool) -> TransferKind? {
+        guard let folder = cards.first(where: { $0.id == cardID })?.url, !urls.isEmpty else { return nil }
+        if optionKey { return .copy }
+        return urls.allSatisfy { FileOperations.isSameVolume($0, folder) } ? .move : .copy
+    }
+
+    /// Moves or copies the dropped items into the folder of the card. Returns false when no item went into the folder.
+    @discardableResult
+    func drop(_ urls: [URL], on cardID: FolderCard.ID, optionKey: Bool) -> Bool {
+        guard let kind = dropKind(for: urls, on: cardID, optionKey: optionKey) else { return false }
+        return transfer(urls, to: cardID, kind: kind)
+    }
+
+    /// Moves or copies the items into the folder of the card. An item that is already in the folder does not move.
+    /// A folder cannot go into itself. When a name is taken, the new item gets a free name.
+    /// The last new item becomes the selected item. Returns false when no item went into the folder.
+    @discardableResult
+    func transfer(_ urls: [URL], to cardID: FolderCard.ID, kind: TransferKind) -> Bool {
+        guard let folder = cards.first(where: { $0.id == cardID })?.url else { return false }
+        commitRename()
+        var moves: [(from: URL, to: URL)] = []
+        var copies: [URL] = []
+        for url in urls {
+            if FileOperations.isFolder(folder, inOrEqualTo: url) {
+                errorMessage = "The folder “\(url.lastPathComponent)” cannot go into itself."
+            } else if kind == .copy {
+                attempt { copies.append(try FileOperations.copy(url, into: folder)) }
+            } else if !FileOperations.isItem(url, directlyIn: folder) {
+                attempt { moves.append((from: url, to: try FileOperations.move(url, into: folder))) }
+            }
+        }
+        if !moves.isEmpty { undoSteps.append(.move(moves)) }
+        if !copies.isEmpty { undoSteps.append(.copy(copies)) }
+        guard let last = copies.last ?? moves.last?.to else { return false }
+        reload()
+        select(itemNamed: last.lastPathComponent, in: cardID)
+        return true
+    }
+
+    /// Reverses the last file operation: a rename, a move to the Trash, a paste or a drop.
+    /// The undo of a copy moves the copy to the Trash. Returns false when there is no operation to reverse.
+    @discardableResult
+    func undo() -> Bool {
+        guard let step = undoSteps.popLast() else { return false }
+        switch step {
+        case .rename(let from, let to):
+            if attempt({ try FileManager.default.moveItem(at: to, to: from) }) {
+                moveCards(from: to, to: from)
+            }
+        case .move(let moves):
+            for move in moves {
+                attempt { try FileManager.default.moveItem(at: move.to, to: move.from) }
+            }
+        case .copy(let copies):
+            for copy in copies {
+                attempt { _ = try trash(copy) }
+            }
+        case .trash(let original, let trashed):
+            attempt { try FileManager.default.moveItem(at: trashed, to: original) }
+        }
+        reload()
+        return true
     }
 }

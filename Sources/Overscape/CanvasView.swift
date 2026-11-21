@@ -13,7 +13,8 @@ struct CanvasView: View {
                 onScrollBegan: { model.beginScroll(at: $0) },
                 onScroll: { model.scroll(by: $0) },
                 onMagnify: { model.zoom(by: $0, around: $1) },
-                onViewMode: { model.setViewModeOfHoveredCard($0) }
+                onMouseDown: { model.clearSelection() },
+                onCommand: { model.perform($0) }
             )
 
             ZStack(alignment: .topLeading) {
@@ -47,6 +48,16 @@ struct CanvasView: View {
             let corner = CGPoint(x: location.x - 20, y: location.y - 15)
             return model.addFolders(urls, at: model.canvasPoint(fromView: corner))
         } isTargeted: { isTargeted = $0 }
+        .alert(
+            "The operation did not complete",
+            isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
+        ) {
+            Button("OK") {}
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+        // The files can change while a different workspace shows.
+        .task { model.reload() }
     }
 }
 

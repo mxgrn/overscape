@@ -27,13 +27,14 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | File | Purpose |
 | --- | --- |
 | `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
-| `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `CanvasModel`. |
+| `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `ItemRef`, `CanvasCommand`, `UndoStep`, `CanvasModel`. |
+| `Sources/Overscape/FileOperations.swift` | `FileOperations` (copy, move and Trash on disk, free names, the volume check) and `FolderWatcher` (reports changes in a folder). |
 | `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel`. |
 | `Sources/Overscape/SidebarView.swift` | `MainView` (sidebar and canvas in a `NavigationSplitView`) and `SidebarView` (the list of workspaces). |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
-| `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll and drag events on the canvas. |
-| `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, double-click, drag to move. |
-| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel` and save and restore. |
+| `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll, click and drag events on the canvas and changes keys into `CanvasCommand` values. |
+| `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, the name field for a rename, double-click, drag to move, drag and drop of items. |
+| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel`, save and restore, and the file operations. |
 
 ## Architecture
 
@@ -43,6 +44,9 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - **Card sizes.** `CardLayout` holds all card sizes. The view and the model both use it. The model must know row positions to place child cards and to draw connector lines. If you change the card layout in the view, change `CardLayout` too.
 - **Scroll position.** Each card reports the scroll offset of its file list to the model (`setScrollOffset`). The model needs it so that connector lines start at the correct row.
 - **Card drag.** A card drag changes the card position in the model during the drag, not only at the end. This makes the connector lines follow the card.
+- **Selection and rename.** The model holds the selected item (`selection`), the item that the user renames (`renaming`) and the text in the name field (`renameDraft`). The keyboard commands need them.
+- **File operations.** The model does all file operations (`rename`, `trashSelection`, `copySelection`, `paste`, `drop`, `undo`). After each operation it calls `reload`, which reads the file lists of all cards again. When an operation fails, the model sets `errorMessage` and the canvas shows an alert.
+- **Keyboard commands.** `CanvasEventView` changes a key into a `CanvasCommand` and the model does it (`perform`). While a text field has the focus, the keys go to the text field.
 
 ## Behavior
 
@@ -83,9 +87,34 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - A header with the folder icon, the folder name, the number of items and a close (×) button. Drag the header to move the card.
 - The columns are Name, Size and Date Modified. Dates use the format `dd.MM.yy, HH:mm`. Folders show `--` as the size.
 - Items are sorted newest first. Hidden files are not shown.
-- A single click selects a row. Rows that have an open child card stay highlighted.
+- A single click selects a row. Rows that have an open child card are not highlighted. Only the selected row is highlighted.
+- The canvas has not more than one selected item. A click on a row in a different card moves the selection to that card. A click on empty canvas removes the selection.
 - When the mouse is on a card, the card border becomes thicker and uses the full accent color.
 - The list scrolls when it is taller than `CardLayout.maxListHeight`.
+
+### File operations
+
+The keys are the same as in Finder. They operate on the selected item. There is no multi-selection.
+
+- **Rename.** Return starts the rename of the selected item. The name field shows the full name, with the name selected but not the extension. Return keeps the new name. Escape cancels. A click on a different item or on empty canvas also keeps the new name. A name with only spaces is ignored. A name cannot start with a dot or contain a slash. If the name is taken, an alert shows and the name does not change.
+- When a folder gets a new name, the open cards for that folder and for the folders in it stay open and get the new path.
+- **Delete.** Command-Delete moves the selected item to the Trash. There is no confirmation.
+- **Copy and paste.** Command-C puts the selected item on the system pasteboard. Command-V copies the files on the pasteboard into the folder of the card under the cursor (`hoveredCardID`). Command-Option-V moves them instead. Files that were copied in Finder can be pasted, and Finder can paste files that were copied here.
+- **Drag and drop.** Drag a row or an icon to a different card to put the item into the folder of that card. The Finder rule applies: a move on the same volume, a copy between different volumes. With the Option key, the drop always makes a copy. The target card shows a stronger border during the drag.
+- Files and folders that are dragged from Finder onto a card go into the folder of that card, with the same rule. A folder that is dropped on empty canvas makes a new card, also when the drag starts in a card.
+- A row or an icon can be dragged to Finder or to a different app. The target app then does the move or the copy.
+- An item that is already in the target folder does not move. A folder cannot go into itself.
+- **Name conflicts.** When the name is taken in the target folder, the new item gets a free name and no item is replaced: "a copy.txt", "a copy 2.txt" for a copy and "a 2.txt", "a 3.txt" for a move.
+- After a paste or a drop, the new item is the selected item.
+- **Undo.** Command-Z reverses the last file operation in the workspace: a rename, a move to the Trash, a paste or a drop. The undo of a copy moves the copy to the Trash. Each workspace has its own list of operations. The list is not saved. There is no redo.
+- When a folder is moved or goes to the Trash, the cards for that folder and the cards opened from them close. An undo does not open them again.
+
+### Live update
+
+- Each card watches its folder (`FolderWatcher`). When an item is added, removed or renamed, in this app or in a different app, the model reads the file lists again (`reload`).
+- A card whose folder does not exist closes. A child card whose folder is not in the parent card closes. The cards opened from a closed card also close.
+- A change of only the size or the date of a file does not start an update.
+- When a workspace shows, its file lists are read again.
 
 ### Resize
 
@@ -118,11 +147,18 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - When a card changes its view mode, its height changes (if it has no fixed height). A resize also changes the height. Its child cards do not move, so they can overlap or the lines can cross.
 - When sibling cards move down, the cards opened from them do not move. Lines further down the tree can then cross.
 - Child card order uses the row order, not the current card positions. If you drag a child card out of order, a new card can overlap it.
+- When the number of items in a card changes (a file operation or a live update), its height changes (if it has no fixed height). The other cards do not move, so cards can overlap.
+- A folder that gets a new name in a different app is a removed folder and a new folder for the live update. Its cards close.
+- An item cannot be dropped on a folder row to put it into that subfolder. The drop always goes into the folder of the card.
+- The file commands are not in the menu bar. The Edit menu items stay disabled, but the keys work.
+- Undo can fail when a different operation changed the same items after the operation. An alert then shows.
 
 ## Conventions
 
 - Write comments and docs in ASD-STE100 Simplified Technical English.
 - Keep tests short and realistic. Set up only the data that the test checks.
 - In tests, get file URLs from `card.entries`. Do not build them from the temporary directory path: on macOS that path is a symlink (`/var` to `/private/var`), so the URLs do not compare equal.
+- In tests for copy and paste, set `model.pasteboard` to a pasteboard with a unique name, so that the tests do not change the system pasteboard.
+- A test must not leave items in the Trash of the user. A test that moves an item to the Trash must put it back with `undo`, or set `model.trash` to a function that removes the item.
 - Run `swift build` and `swift test` after each change. Do not leave compiler warnings.
 - In commit messages, describe the change in one short line.

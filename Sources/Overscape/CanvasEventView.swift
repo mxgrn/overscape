@@ -5,7 +5,8 @@ import SwiftUI
 /// - pinch anywhere in the canvas zooms around the cursor,
 /// - a mouse drag on empty canvas pans,
 /// - a two-finger scroll that starts on empty canvas pans,
-/// - Command-1 and Command-2 set the view mode of the card under the cursor.
+/// - a click on empty canvas removes the selection,
+/// - the keys of Finder become canvas commands (view modes, rename, Trash, copy, paste, undo).
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     /// The start of a two-finger scroll. The location is nil when the scroll starts outside the canvas.
@@ -13,8 +14,10 @@ struct CanvasEventView: NSViewRepresentable {
     /// Returns false when the scroll does not pan the canvas. The event then continues.
     var onScroll: (CGSize) -> Bool
     var onMagnify: (_ factor: CGFloat, _ location: CGPoint) -> Void
-    /// Returns false when the key had no effect. The event then continues.
-    var onViewMode: (CardViewMode) -> Bool
+    /// A mouse click on empty canvas.
+    var onMouseDown: () -> Void
+    /// Returns false when the command had no effect. The event then continues.
+    var onCommand: (CanvasCommand) -> Bool
 
     func makeNSView(context: Context) -> EventNSView {
         let view = EventNSView()
@@ -22,7 +25,8 @@ struct CanvasEventView: NSViewRepresentable {
         view.onScrollBegan = onScrollBegan
         view.onScroll = onScroll
         view.onMagnify = onMagnify
-        view.onViewMode = onViewMode
+        view.onMouseDown = onMouseDown
+        view.onCommand = onCommand
         return view
     }
 
@@ -31,7 +35,8 @@ struct CanvasEventView: NSViewRepresentable {
         view.onScrollBegan = onScrollBegan
         view.onScroll = onScroll
         view.onMagnify = onMagnify
-        view.onViewMode = onViewMode
+        view.onMouseDown = onMouseDown
+        view.onCommand = onCommand
     }
 
     final class EventNSView: NSView {
@@ -39,7 +44,8 @@ struct CanvasEventView: NSViewRepresentable {
         var onScrollBegan: (CGPoint?) -> Void = { _ in }
         var onScroll: (CGSize) -> Bool = { _ in false }
         var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
-        var onViewMode: (CardViewMode) -> Bool = { _ in false }
+        var onMouseDown: () -> Void = {}
+        var onCommand: (CanvasCommand) -> Bool = { _ in false }
         private var magnifyMonitor: Any?
         private var scrollMonitor: Any?
         private var keyMonitor: Any?
@@ -75,18 +81,35 @@ struct CanvasEventView: NSViewRepresentable {
                 let delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
                 return self.onScroll(delta) ? nil : event
             }
-            // The same keys as the view modes in Finder.
+            // The same keys as in Finder. During a rename, the keys go to the name field.
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, event.window === self.window,
-                      event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+                      !(self.window?.firstResponder is NSText),
+                      let command = Self.command(for: event)
                 else { return event }
-                let mode: CardViewMode
-                switch event.charactersIgnoringModifiers {
-                case "1": mode = .icons
-                case "2": mode = .list
-                default: return event
-                }
-                return self.onViewMode(mode) ? nil : event
+                return self.onCommand(command) ? nil : event
+            }
+        }
+
+        private static let returnKey: UInt16 = 36
+        private static let keypadEnterKey: UInt16 = 76
+        private static let deleteKey: UInt16 = 51
+
+        private static func command(for event: NSEvent) -> CanvasCommand? {
+            let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
+            // The character that the key gives with Command. On a keyboard layout without
+            // Latin letters, this is the Latin letter, as for menu commands.
+            let character = event.characters(byApplyingModifiers: .command)?.lowercased()
+            switch (modifiers, event.keyCode, character) {
+            case ([], returnKey, _), ([], keypadEnterKey, _): return .rename
+            case (.command, deleteKey, _): return .moveToTrash
+            case (.command, _, "1"): return .viewMode(.icons)
+            case (.command, _, "2"): return .viewMode(.list)
+            case (.command, _, "c"): return .copy
+            case (.command, _, "v"): return .paste
+            case ([.command, .option], _, "v"): return .pasteAndMove
+            case (.command, _, "z"): return .undo
+            default: return nil
             }
         }
 
@@ -102,6 +125,10 @@ struct CanvasEventView: NSViewRepresentable {
             scrollMonitor = nil
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            onMouseDown()
         }
 
         override func mouseDragged(with event: NSEvent) {

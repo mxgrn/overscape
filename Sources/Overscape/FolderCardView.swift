@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct FolderCardView: View {
     let card: FolderCard
@@ -8,9 +9,10 @@ struct FolderCardView: View {
     @State private var dragStart: CGPoint?
     /// The card frame at the start of a resize.
     @State private var resizeStart: CGRect?
-    @State private var selection: FileEntry.ID?
     /// True while the mouse is on the card. The card then shows a stronger border.
     @State private var isHovered = false
+    /// True while dragged files are on the card. The card then shows a stronger border.
+    @State private var isDropTargeted = false
 
     private static let sizeColumn: CGFloat = 70
     private static let dateColumn: CGFloat = 120
@@ -35,15 +37,22 @@ struct FolderCardView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(
-                    Color.accentColor.opacity(isHovered ? 1 : 0.5),
-                    lineWidth: isHovered ? 2.5 : 1.5
+                    Color.accentColor.opacity(isHovered || isDropTargeted ? 1 : 0.5),
+                    lineWidth: isHovered || isDropTargeted ? 2.5 : 1.5
                 )
         )
         .onHover { hovering in
             isHovered = hovering
             model.setHovered(card.id, hovering)
         }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isHovered || isDropTargeted)
+        .onDrop(of: [.fileURL], delegate: CardDropDelegate(cardID: card.id, model: model, isTargeted: $isDropTargeted))
+        // Show the changes that other apps make in the folder.
+        .task(id: card.url) {
+            for await _ in FolderWatcher.changes(in: card.url) {
+                model.reload()
+            }
+        }
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .overlay { resizeHandles }
         .offset(x: card.position.x, y: card.position.y)
@@ -96,9 +105,9 @@ struct FolderCardView: View {
         .frame(height: CardLayout.columnHeaderHeight)
     }
 
+    /// List mode. Rows with an open child card are not highlighted, only the selected row.
     private var list: some View {
-        let openChildren = Set(model.cards.filter { $0.parentID == card.id }.map(\.url))
-        return ScrollView {
+        ScrollView {
             LazyVStack(spacing: 0) {
                 if card.entries.isEmpty {
                     Text("Empty folder")
@@ -107,7 +116,7 @@ struct FolderCardView: View {
                         .frame(height: CardLayout.rowHeight)
                 }
                 ForEach(Array(card.entries.enumerated()), id: \.element.id) { index, entry in
-                    row(entry, index: index, isOpen: openChildren.contains(entry.url))
+                    row(entry, index: index)
                 }
             }
             // The connector lines start at a row, so the model must know the scroll position.
@@ -156,7 +165,7 @@ struct FolderCardView: View {
     }
 
     private func iconCell(_ entry: FileEntry) -> some View {
-        let isSelected = selection == entry.id
+        let isSelected = isSelected(entry)
         return VStack(spacing: 4) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
                 .resizable()
@@ -166,38 +175,58 @@ struct FolderCardView: View {
                     RoundedRectangle(cornerRadius: 5)
                         .fill(isSelected ? Color.primary.opacity(0.1) : .clear)
                 )
-            Text(entry.name)
-                .font(.system(size: 12))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(isSelected ? Color.accentColor : .clear)
-                )
+            if isRenaming(entry) {
+                RenameField(model: model)
+                    .font(.system(size: 12))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 4)
+            } else {
+                Text(entry.name)
+                    .font(.system(size: 12))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isSelected ? Color.accentColor : .clear)
+                    )
+            }
         }
         .padding(.top, 4)
         .frame(width: CardLayout.iconCellWidth(width: card.width), height: CardLayout.iconCellHeight, alignment: .top)
         .contentShape(Rectangle())
-        .onTapGesture { selection = entry.id }
+        .onTapGesture { model.select(entry.url, in: card.id) }
         .simultaneousGesture(TapGesture(count: 2).onEnded {
             guard entry.isDirectory else { return }
             model.openChild(of: card.id, folder: entry.url)
         })
+        .onDrag { NSItemProvider(object: entry.url as NSURL) }
     }
 
-    private func row(_ entry: FileEntry, index: Int, isOpen: Bool) -> some View {
+    private func isSelected(_ entry: FileEntry) -> Bool {
+        model.selection == ItemRef(cardID: card.id, url: entry.url)
+    }
+
+    private func isRenaming(_ entry: FileEntry) -> Bool {
+        model.renaming == ItemRef(cardID: card.id, url: entry.url)
+    }
+
+    private func row(_ entry: FileEntry, index: Int) -> some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
                     .resizable()
                     .frame(width: 16, height: 16)
-                Text(entry.name)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if isRenaming(entry) {
+                    RenameField(model: model)
+                } else {
+                    Text(entry.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -212,13 +241,14 @@ struct FolderCardView: View {
         .font(.system(size: 13))
         .padding(.horizontal, 10)
         .frame(height: CardLayout.rowHeight)
-        .background(rowBackground(isHighlighted: isOpen || selection == entry.id, index: index))
+        .background(rowBackground(isHighlighted: isSelected(entry), index: index))
         .contentShape(Rectangle())
-        .onTapGesture { selection = entry.id }
+        .onTapGesture { model.select(entry.url, in: card.id) }
         .simultaneousGesture(TapGesture(count: 2).onEnded {
             guard entry.isDirectory else { return }
             model.openChild(of: card.id, folder: entry.url)
         })
+        .onDrag { NSItemProvider(object: entry.url as NSURL) }
     }
 
     private func rowBackground(isHighlighted: Bool, index: Int) -> Color {
@@ -308,6 +338,82 @@ struct FolderCardView: View {
     static func format(size: Int64?) -> String {
         guard let size else { return "--" }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+}
+
+/// The name field of the item that the user renames. Return keeps the new name and Escape cancels.
+private struct RenameField: View {
+    @Bindable var model: CanvasModel
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField("Name", text: $model.renameDraft)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 3)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.accentColor, lineWidth: 1.5))
+            .focused($isFocused)
+            .onSubmit { model.commitRename() }
+            .onExitCommand { model.cancelRename() }
+            // The field cannot get the focus in the same update that adds it to the window.
+            .onAppear { DispatchQueue.main.async { isFocused = true } }
+            .onChange(of: isFocused) { _, focused in
+                if focused {
+                    selectNameWithoutExtension()
+                } else {
+                    model.commitRename()
+                }
+            }
+    }
+
+    /// As in Finder, the rename starts with the name selected, but not the extension.
+    private func selectNameWithoutExtension() {
+        let name = model.renameDraft as NSString
+        let length = (name.deletingPathExtension as NSString).length
+        DispatchQueue.main.async {
+            // The field editor is the first responder while a text field has the focus.
+            guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
+            editor.setSelectedRange(NSRange(location: 0, length: length))
+        }
+    }
+}
+
+/// Lets a card receive dragged files, from a different card or from Finder.
+private struct CardDropDelegate: DropDelegate {
+    let cardID: FolderCard.ID
+    let model: CanvasModel
+    @Binding var isTargeted: Bool
+
+    func dropEntered(info: DropInfo) {
+        isTargeted = true
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    /// Sets the cursor badge: a copy shows a plus sign.
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        switch model.dropKind(for: Self.draggedURLs, on: cardID, optionKey: Self.isOptionKeyDown) {
+        case .move: DropProposal(operation: .move)
+        case .copy: DropProposal(operation: .copy)
+        case nil: DropProposal(operation: .forbidden)
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        return model.drop(Self.draggedURLs, on: cardID, optionKey: Self.isOptionKeyDown)
+    }
+
+    /// The files of the drag in progress. The drag pasteboard gives them immediately.
+    private static var draggedURLs: [URL] {
+        let objects = NSPasteboard(name: .drag).readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return objects as? [URL] ?? []
+    }
+
+    private static var isOptionKeyDown: Bool {
+        NSEvent.modifierFlags.contains(.option)
     }
 }
 
