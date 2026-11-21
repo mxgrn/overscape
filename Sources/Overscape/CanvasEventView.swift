@@ -95,6 +95,7 @@ struct CanvasEventView: NSViewRepresentable {
         private static let returnKey: UInt16 = 36
         private static let keypadEnterKey: UInt16 = 76
         private static let deleteKey: UInt16 = 51
+        private static let escapeKey: UInt16 = 53
         private static let leftArrowKey: UInt16 = 123
         private static let rightArrowKey: UInt16 = 124
         private static let downArrowKey: UInt16 = 125
@@ -108,6 +109,7 @@ struct CanvasEventView: NSViewRepresentable {
             switch (modifiers, event.keyCode, character) {
             case ([], returnKey, _), ([], keypadEnterKey, _): return .rename
             case (.command, deleteKey, _): return .moveToTrash
+            case ([], escapeKey, _): return .closeCard
             case ([], upArrowKey, _): return .moveSelection(.up)
             case ([], downArrowKey, _): return .moveSelection(.down)
             case ([], leftArrowKey, _): return .moveSelection(.left)

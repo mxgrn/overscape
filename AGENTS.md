@@ -106,6 +106,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - The canvas has not more than one selected item. A click on a row in a different card moves the selection to that card. A click on empty canvas removes the selection.
 - When the mouse is on a card, the card border becomes thicker and uses the full accent color.
 - The list scrolls when it is taller than `CardLayout.maxListHeight`.
+- Escape closes the card under the cursor (`hoveredCardID`), as the close (×) button does. If no card is under the cursor, the key does nothing. During a rename, Escape cancels the rename and the card stays open.
 
 ### Arrow keys
 

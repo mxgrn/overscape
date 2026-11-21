@@ -263,6 +263,7 @@ enum CanvasCommand: Equatable {
     case moveSelection(ArrowDirection)
     case openSelection
     case showParentFolder
+    case closeCard
     case rename
     case moveToTrash
     case copy
@@ -633,6 +634,15 @@ final class CanvasModel {
         }
     }
 
+    /// Closes the card under the cursor and all cards that were opened from it.
+    /// Returns false when there is no card under the cursor.
+    @discardableResult
+    func closeHoveredCard() -> Bool {
+        guard let hoveredCardID else { return false }
+        close(hoveredCardID)
+        return true
+    }
+
     // MARK: - Selection
 
     /// Selects an item. A rename of a different item ends and keeps the new name.
@@ -708,6 +718,7 @@ final class CanvasModel {
         case .moveSelection(let direction): moveSelectionInHoveredCard(direction)
         case .openSelection: openSelection()
         case .showParentFolder: showParentFolderInHoveredCard()
+        case .closeCard: closeHoveredCard()
         case .rename: beginRename()
         case .moveToTrash: trashSelection()
         case .copy: copySelection()

@@ -82,6 +82,20 @@ struct CanvasModelTests {
         #expect(model.cards.isEmpty)
     }
 
+    @Test func escapeClosesOnlyTheCardUnderTheCursor() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root, root.appendingPathComponent("a")], at: .zero)
+        let kept = model.cards[0].id
+
+        #expect(!model.perform(.closeCard))
+        model.setHovered(model.cards[1].id, true)
+        #expect(model.perform(.closeCard))
+
+        #expect(model.cards.map(\.id) == [kept])
+    }
+
     @Test func restoreBringsBackTheCardTreeAndTheViewport() throws {
         let root = try makeFolder(subfolders: ["a"])
         defer { try? FileManager.default.removeItem(at: root) }
