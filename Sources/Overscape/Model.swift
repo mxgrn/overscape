@@ -236,6 +236,8 @@ final class CanvasModel {
     /// Viewport: a canvas point `p` shows at `p * zoom + pan` in the view.
     var zoom: CGFloat = 1
     var pan: CGSize = .zero
+    /// True when the current two-finger scroll pans the canvas.
+    private(set) var isScrollPanning = false
 
     static let zoomRange: ClosedRange<CGFloat> = 0.25...3
 
@@ -300,6 +302,26 @@ final class CanvasModel {
     func pan(by delta: CGSize) {
         pan.width += delta.width
         pan.height += delta.height
+    }
+
+    /// Starts a two-finger scroll at `point` (view coordinates). `point` is nil when the scroll
+    /// starts outside the canvas. The scroll pans the canvas only when it starts on empty canvas.
+    func beginScroll(at point: CGPoint?) {
+        guard let point else {
+            isScrollPanning = false
+            return
+        }
+        let canvasPoint = canvasPoint(fromView: point)
+        isScrollPanning = !cards.contains { $0.frame.contains(canvasPoint) }
+    }
+
+    /// Pans the canvas during a two-finger scroll that started on empty canvas, also when a card
+    /// is under the cursor now. Returns false when the scroll does not pan. The event then continues.
+    @discardableResult
+    func scroll(by delta: CGSize) -> Bool {
+        guard isScrollPanning else { return false }
+        pan(by: delta)
+        return true
     }
 
     func canvasPoint(fromView point: CGPoint) -> CGPoint {

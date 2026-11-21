@@ -10,6 +10,8 @@ struct CanvasView: View {
 
             CanvasEventView(
                 onPan: { model.pan(by: $0) },
+                onScrollBegan: { model.beginScroll(at: $0) },
+                onScroll: { model.scroll(by: $0) },
                 onMagnify: { model.zoom(by: $0, around: $1) },
                 onViewMode: { model.setViewModeOfHoveredCard($0) }
             )

@@ -16,6 +16,36 @@ struct CanvasModelTests {
         #expect(model.canvasPoint(fromView: anchor) == before)
     }
 
+    @Test func aScrollFromEmptyCanvasPansAlsoWhenACardComesBelowTheCursor() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: CGPoint(x: 100, y: 100))
+        let cursor = CGPoint(x: 50, y: 50)
+
+        model.beginScroll(at: cursor)
+        #expect(model.scroll(by: CGSize(width: -80, height: -80)))
+        #expect(model.cards[0].frame.contains(model.canvasPoint(fromView: cursor)))
+
+        #expect(model.scroll(by: CGSize(width: -10, height: 0)))
+        #expect(model.pan == CGSize(width: -90, height: -80))
+    }
+
+    @Test func aScrollFromACardOrFromOutsideTheCanvasDoesNotPan() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: CGPoint(x: 100, y: 100))
+
+        model.beginScroll(at: CGPoint(x: 110, y: 110))
+        #expect(!model.scroll(by: CGSize(width: 0, height: 30)))
+
+        model.beginScroll(at: nil)
+        #expect(!model.scroll(by: CGSize(width: 0, height: 30)))
+
+        #expect(model.pan == .zero)
+    }
+
     @Test func childCardsKeepTheOrderOfTheirRows() throws {
         let root = try makeFolder(subfolders: ["a", "b", "c"])
         defer { try? FileManager.default.removeItem(at: root) }

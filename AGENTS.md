@@ -31,7 +31,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel`. |
 | `Sources/Overscape/SidebarView.swift` | `MainView` (sidebar and canvas in a `NavigationSplitView`) and `SidebarView` (the list of workspaces). |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
-| `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, drag and cursor move events on the canvas. |
+| `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll and drag events on the canvas. |
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, double-click, drag to move. |
 | `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel` and save and restore. |
 
@@ -52,8 +52,9 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - A drop of one or more folders makes one card for each folder, near the cursor. Items that are not folders are ignored.
 - A trackpad pinch zooms from 25% to 300%. The point under the cursor stays in place. Pinch works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
 - A drag on empty canvas moves (pans) the canvas.
-- A two-finger scroll or the mouse wheel on empty canvas does nothing.
-- When you hold the Control key and move the cursor, the canvas moves with the cursor. This works everywhere in the window, also on top of a card. A local `NSEvent` monitor catches it.
+- A two-finger scroll that starts on empty canvas moves (pans) the canvas. The pan continues until the scroll and its momentum end, also when a card moves below the cursor. A local `NSEvent` monitor catches it.
+- A two-finger scroll that starts on a card does not pan the canvas. It scrolls the file list of that card. The model makes this decision at the start of each scroll (`beginScroll`), from the card frames.
+- The mouse wheel on empty canvas does nothing.
 - The dot grid moves and scales with the canvas. When the dots are too close together, they are hidden.
 
 ### Workspaces
@@ -113,7 +114,6 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 
 ## Known limits and open questions
 
-- A scroll on top of a card moves the file list in that card, not the canvas. The wanted behavior is not decided yet.
 - It is not decided if closing a card must also close its child cards. At the moment, it does.
 - When a card changes its view mode, its height changes (if it has no fixed height). A resize also changes the height. Its child cards do not move, so they can overlap or the lines can cross.
 - When sibling cards move down, the cards opened from them do not move. Lines further down the tree can then cross.

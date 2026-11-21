@@ -4,10 +4,14 @@ import SwiftUI
 /// An AppKit view behind the cards that turns raw input into canvas navigation:
 /// - pinch anywhere in the canvas zooms around the cursor,
 /// - a mouse drag on empty canvas pans,
-/// - a cursor move with the Control key pans anywhere in the canvas,
+/// - a two-finger scroll that starts on empty canvas pans,
 /// - Command-1 and Command-2 set the view mode of the card under the cursor.
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
+    /// The start of a two-finger scroll. The location is nil when the scroll starts outside the canvas.
+    var onScrollBegan: (CGPoint?) -> Void
+    /// Returns false when the scroll does not pan the canvas. The event then continues.
+    var onScroll: (CGSize) -> Bool
     var onMagnify: (_ factor: CGFloat, _ location: CGPoint) -> Void
     /// Returns false when the key had no effect. The event then continues.
     var onViewMode: (CardViewMode) -> Bool
@@ -15,6 +19,8 @@ struct CanvasEventView: NSViewRepresentable {
     func makeNSView(context: Context) -> EventNSView {
         let view = EventNSView()
         view.onPan = onPan
+        view.onScrollBegan = onScrollBegan
+        view.onScroll = onScroll
         view.onMagnify = onMagnify
         view.onViewMode = onViewMode
         return view
@@ -22,16 +28,20 @@ struct CanvasEventView: NSViewRepresentable {
 
     func updateNSView(_ view: EventNSView, context: Context) {
         view.onPan = onPan
+        view.onScrollBegan = onScrollBegan
+        view.onScroll = onScroll
         view.onMagnify = onMagnify
         view.onViewMode = onViewMode
     }
 
     final class EventNSView: NSView {
         var onPan: (CGSize) -> Void = { _ in }
+        var onScrollBegan: (CGPoint?) -> Void = { _ in }
+        var onScroll: (CGSize) -> Bool = { _ in false }
         var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
         var onViewMode: (CardViewMode) -> Bool = { _ in false }
         private var magnifyMonitor: Any?
-        private var moveMonitor: Any?
+        private var scrollMonitor: Any?
         private var keyMonitor: Any?
 
         override var isFlipped: Bool { true }
@@ -49,16 +59,21 @@ struct CanvasEventView: NSViewRepresentable {
                 self.onMagnify(1 + event.magnification, location)
                 return nil
             }
-            // With the Control key, the canvas follows the cursor, also over a card.
-            // The event continues to the views, so that card hover stays correct.
-            window?.acceptsMouseMovedEvents = true
-            moveMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-                guard let self, event.window === self.window,
-                      event.modifierFlags.contains(.control) else { return event }
-                let location = self.convert(event.locationInWindow, from: nil)
-                guard self.bounds.contains(location) else { return event }
-                self.onPan(CGSize(width: event.deltaX, height: event.deltaY))
-                return event
+            // A scroll over a card goes to the card's scroll view, not to this view.
+            // A local monitor sees every scroll in the window. Thus a pan that starts on
+            // empty canvas can continue when a card moves below the cursor.
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self else { return event }
+                // A mouse wheel has no phases. It does not pan the canvas.
+                guard !event.phase.isEmpty || !event.momentumPhase.isEmpty else { return event }
+                if event.phase.contains(.began) {
+                    let location = self.convert(event.locationInWindow, from: nil)
+                    let isOnCanvas = event.window === self.window && self.bounds.contains(location)
+                    self.onScrollBegan(isOnCanvas ? location : nil)
+                }
+                // The decision from the start of the scroll stays until the momentum ends.
+                let delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
+                return self.onScroll(delta) ? nil : event
             }
             // The same keys as the view modes in Finder.
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -83,8 +98,8 @@ struct CanvasEventView: NSViewRepresentable {
         private func removeMonitor() {
             if let magnifyMonitor { NSEvent.removeMonitor(magnifyMonitor) }
             magnifyMonitor = nil
-            if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
-            moveMonitor = nil
+            if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+            scrollMonitor = nil
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
         }
