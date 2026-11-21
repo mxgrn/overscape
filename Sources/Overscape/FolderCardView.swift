@@ -175,9 +175,7 @@ struct FolderCardView: View {
     private func iconCell(_ entry: FileEntry) -> some View {
         let isSelected = isSelected(entry)
         return VStack(spacing: 4) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
-                .resizable()
-                .frame(width: CardLayout.iconSize, height: CardLayout.iconSize)
+            ItemThumbnail(entry: entry)
                 .padding(3)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
@@ -366,6 +364,31 @@ private extension View {
 }
 
 /// The name field of the item that the user renames. Return keeps the new name and Escape cancels.
+/// The picture of an item in icon mode: the thumbnail of the file, as in Finder.
+/// The item shows its icon until the thumbnail is ready, and when there is no thumbnail.
+private struct ItemThumbnail: View {
+    let entry: FileEntry
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var thumbnail: NSImage?
+
+    var body: some View {
+        // A cell that comes into view again gets its thumbnail from the cache, without a flash of the icon.
+        Image(nsImage: thumbnail ?? ThumbnailLoader.cached(entry) ?? NSWorkspace.shared.icon(forFile: entry.url.path))
+            .resizable()
+            .scaledToFit()
+            .frame(width: CardLayout.iconSize, height: CardLayout.iconSize)
+            // A changed file gets a new thumbnail.
+            .task(id: entry) {
+                // The thumbnail has sufficient pixels for the largest zoom of the canvas.
+                thumbnail = await ThumbnailLoader.thumbnail(
+                    for: entry, size: CardLayout.iconSize,
+                    scale: displayScale * CanvasModel.zoomRange.upperBound
+                )
+            }
+    }
+}
+
 private struct RenameField: View {
     @Bindable var model: CanvasModel
     @FocusState private var isFocused: Bool

@@ -29,6 +29,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon (`AppIcon`). It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
 | `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `ItemRef`, `CanvasCommand`, `UndoStep`, `CanvasModel`. |
 | `Sources/Overscape/FileOperations.swift` | `FileOperations` (copy, move and Trash on disk, free names, the volume check) and `FolderWatcher` (reports changes in a folder). |
+| `Sources/Overscape/ThumbnailLoader.swift` | `ThumbnailLoader`: makes and keeps the thumbnails of files for icon mode. |
 | `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel` and its own favorites. |
 | `Sources/Overscape/SidebarView.swift` | `MainView` (sidebar and canvas in a `NavigationSplitView`), `SidebarView` (the list of workspaces and the favorites) and `FavoriteDrag` (the drag of a favorite). |
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
@@ -36,7 +37,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, the name field for a rename, double-click, drag to move, drag and drop of items. |
 | `Sources/Overscape/Resources/AppIcon.png` | The app icon, 1024 × 1024 pixels. It is a package resource. The app sets it as the Dock icon at the start. |
 | `Assets/AppIcon.svg` | The source of the app icon. It is not part of the build. |
-| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel`, save and restore, and the file operations. |
+| `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel`, `ThumbnailLoader`, save and restore, and the file operations. |
 
 ## Architecture
 
@@ -157,6 +158,7 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - A card has two view modes, as in Finder: list (the default) and icons.
 - Command-1 sets icon mode and Command-2 sets list mode for the card under the cursor. The model knows this card (`hoveredCardID`). If no card is under the cursor, the keys do nothing. A local `NSEvent` monitor catches the keys.
 - Icon mode shows a grid of 64-point icons with the names below. With the default width, there are 4 icons on each line. It has no column headers. The card keeps its width. The grid scrolls when it is taller than `CardLayout.maxListHeight`.
+- In icon mode, a file shows a thumbnail of its content in place of its icon, as in Finder (`ThumbnailLoader`). This applies to each file for which macOS can make a thumbnail (images, PDF files and videos, for example). The thumbnail is a static picture: a GIF file does not play. The thumbnail keeps the proportions of the picture. A file shows its icon until the thumbnail is ready. Folders, packages and files without a thumbnail keep their icons. List mode shows only icons.
 - In icon mode, a single click selects an icon. A double-click does the same as in list mode. Icons that have an open child card are not highlighted.
 - In icon mode, the connector line starts at the right edge of the card, level with the line of icons.
 
