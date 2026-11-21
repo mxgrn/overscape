@@ -13,6 +13,11 @@ struct MainView: View {
             CanvasView(model: workspaces.selected.canvas)
                 .id(workspaces.selectedID)
                 .navigationTitle(workspaces.selected.name)
+                // The system background of the title bar starts 3 points to the left of the canvas.
+                // Hide it. Show the canvas color and a separator line that have the same width as the canvas.
+                .toolbarBackground(.hidden, for: .windowToolbar)
+                .overlay(alignment: .top) { Divider() }
+                .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         }
     }
 }
