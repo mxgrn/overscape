@@ -140,16 +140,40 @@ enum CardLayout {
         index: Int, mode: CardViewMode, iconColumns: Int, contentHeight: CGFloat, scrollOffset: CGFloat
     ) -> CGFloat {
         let top = contentTop(mode: mode)
-        let center: CGFloat
-        switch mode {
-        case .list:
-            center = (CGFloat(index) + 0.5) * rowHeight
-        case .icons:
-            center = gridPadding + (CGFloat(index / iconColumns) + 0.5) * iconCellHeight
-        }
-        let y = top + scrollOffset + center
+        let range = itemRange(index: index, mode: mode, iconColumns: iconColumns)
+        let y = top + scrollOffset + (range.lowerBound + range.upperBound) / 2
         return min(max(y, top), top + contentHeight)
     }
+
+    /// The top and the bottom of an item (a row or an icon cell), from the top of the items.
+    static func itemRange(index: Int, mode: CardViewMode, iconColumns: Int) -> ClosedRange<CGFloat> {
+        switch mode {
+        case .list:
+            let top = CGFloat(index) * rowHeight
+            return top...(top + rowHeight)
+        case .icons:
+            let top = gridPadding + CGFloat(index / iconColumns) * iconCellHeight
+            return top...(top + iconCellHeight)
+        }
+    }
+
+    /// The edge of the item area that an item must go to, so that the item is fully in view.
+    /// Nil when the item is fully in view. A difference of less than 1 point is ignored,
+    /// because the scroll offset is not always a full number when the canvas has a zoom.
+    static func scrollEdge(
+        index: Int, mode: CardViewMode, iconColumns: Int, contentHeight: CGFloat, scrollOffset: CGFloat
+    ) -> ScrollEdge? {
+        let range = itemRange(index: index, mode: mode, iconColumns: iconColumns)
+        if range.lowerBound + scrollOffset < -1 { return .top }
+        if range.upperBound + scrollOffset > contentHeight + 1 { return .bottom }
+        return nil
+    }
+}
+
+/// An edge of the item area of a card.
+enum ScrollEdge {
+    case top
+    case bottom
 }
 
 struct Connection: Identifiable {
@@ -609,13 +633,16 @@ final class CanvasModel {
         }
     }
 
-    /// Closes the card and all cards that were opened from it.
+    /// Closes the card. A card that was opened from it also closes if a line connects the two cards
+    /// at this time (`connections`). The same rule applies to the cards opened from each closed card.
+    /// A card without a line stays open and becomes an independent card.
     func close(_ id: FolderCard.ID) {
+        let linked = Set(connections.map(\.id))
         var closing: Set<FolderCard.ID> = [id]
         var found = true
         while found {
             found = false
-            for card in cards where !closing.contains(card.id) {
+            for card in cards where linked.contains(card.id) && !closing.contains(card.id) {
                 if let parentID = card.parentID, closing.contains(parentID) {
                     closing.insert(card.id)
                     found = true
@@ -623,6 +650,11 @@ final class CanvasModel {
             }
         }
         cards.removeAll { closing.contains($0.id) }
+        for index in cards.indices {
+            if let parentID = cards[index].parentID, closing.contains(parentID) {
+                cards[index].parentID = nil
+            }
+        }
         if let hoveredCardID, closing.contains(hoveredCardID) {
             self.hoveredCardID = nil
         }
@@ -634,7 +666,7 @@ final class CanvasModel {
         }
     }
 
-    /// Closes the card under the cursor and all cards that were opened from it.
+    /// Closes the card under the cursor, as `close` does.
     /// Returns false when there is no card under the cursor.
     @discardableResult
     func closeHoveredCard() -> Bool {
@@ -699,6 +731,20 @@ final class CanvasModel {
         return true
     }
 
+    /// The edge of the item area that the item must scroll to, so that the item is fully in view.
+    /// Nil when the item is fully in view or the card does not show it. The card view uses this
+    /// to show the selected item. The model makes the decision, because `scrollTo` without an anchor
+    /// also moves an item that is in view when the card is not fully in the window.
+    func scrollEdge(for item: ItemRef) -> ScrollEdge? {
+        guard let card = cards.first(where: { $0.id == item.cardID }),
+              let index = card.entries.firstIndex(where: { $0.url == item.url })
+        else { return nil }
+        return CardLayout.scrollEdge(
+            index: index, mode: card.viewMode, iconColumns: card.iconColumns,
+            contentHeight: card.contentHeight, scrollOffset: card.scrollOffset
+        )
+    }
+
     private func isShown(_ item: ItemRef) -> Bool {
         cards.first { $0.id == item.cardID }?.entries.contains { $0.url == item.url } ?? false
     }
@@ -729,7 +775,7 @@ final class CanvasModel {
     }
 
     /// Reads the file lists of all cards from disk again. A card whose folder does not exist closes.
-    /// The cards opened from a closed card also close.
+    /// The cards opened from a closed card also close if their folders do not exist.
     func reload() {
         for index in cards.indices {
             let entries = FolderLoader.entries(in: cards[index].url)

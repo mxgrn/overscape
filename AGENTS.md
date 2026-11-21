@@ -44,7 +44,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - Keep logic in the model, not in views. Then you can test it without UI. Each new behavior in the model must have a test.
 - **Coordinates.** Cards have positions in *canvas points*. The viewport maps a canvas point `p` to the view point `p * zoom + pan`. Use `canvasPoint(fromView:)` to convert in the other direction. Mouse movement from gestures is in screen points: divide it by `zoom` before you apply it to a card.
 - **Card sizes.** `CardLayout` holds all card sizes. The view and the model both use it. The model must know row positions to place child cards and to draw connector lines. If you change the card layout in the view, change `CardLayout` too.
-- **Scroll position.** Each card reports the scroll offset of its file list to the model (`setScrollOffset`). The model needs it so that connector lines start at the correct row.
+- **Scroll position.** Each card reports the scroll offset of its file list to the model (`setScrollOffset`). The model needs it so that connector lines start at the correct row, and to find if an item is fully in view (`scrollEdge`).
 - **Card drag.** A card drag changes the card position in the model during the drag, not only at the end. This makes the connector lines follow the card.
 - **Selection and rename.** The model holds the selected item (`selection`), the item that the user renames (`renaming`) and the text in the name field (`renameDraft`). The keyboard commands need them.
 - **File operations.** The model does all file operations (`rename`, `trashSelection`, `copySelection`, `paste`, `drop`, `undo`). After each operation it calls `reload`, which reads the file lists of all cards again. When an operation fails, the model sets `errorMessage` and the canvas shows an alert.
@@ -115,7 +115,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - In icon mode, the four keys select the adjacent icon. Left and Right continue on the line above or below. When the last line is shorter, Down from the line above it selects the last icon.
 - If the card has no selected item, Down and Right select the first item, and Up and Left select the last item. This also applies when the selected item is in a different card: the selection moves to the card under the cursor.
 - At the first or the last item, the selection does not change.
-- The item area scrolls to show the selected item. The card view does this (`showsSelection`), also after a click on an item that is not fully in view.
+- The item area scrolls to show the selected item, also after a click on an item that is not fully in view. An item that is fully in view does not move. The model finds if the item is fully in view and which edge it must go to (`scrollEdge`). The card view then scrolls (`showsSelection`). Do not use `scrollTo` without an anchor: it also moves an item that is in view when the card is not fully in the window.
 
 ### File operations
 
@@ -132,12 +132,12 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - **Name conflicts.** When the name is taken in the target folder, the new item gets a free name and no item is replaced: "a copy.txt", "a copy 2.txt" for a copy and "a 2.txt", "a 3.txt" for a move.
 - After a paste or a drop, the new item is the selected item.
 - **Undo.** Command-Z reverses the last file operation in the workspace: a rename, a move to the Trash, a paste or a drop. The undo of a copy moves the copy to the Trash. Each workspace has its own list of operations. The list is not saved. There is no redo.
-- When a folder is moved or goes to the Trash, the cards for that folder and the cards opened from them close. An undo does not open them again.
+- When a folder is moved or goes to the Trash, the cards for that folder close. The cards opened from them close as they do when you close a card (see "Child cards"). An undo does not open them again.
 
 ### Live update
 
 - Each card watches its folder (`FolderWatcher`). When an item is added, removed or renamed, in this app or in a different app, the model reads the file lists again (`reload`).
-- A card whose folder does not exist closes. The cards opened from a closed card also close.
+- A card whose folder does not exist closes. The cards opened from it close as they do when you close a card (see "Child cards").
 - A change of only the size or the date of a file does not start an update.
 - When a workspace shows, its file lists are read again.
 
@@ -176,11 +176,13 @@ A double-click operates as in Finder.
 - A parent can have many child cards. A subfolder cannot have two open cards from the same parent. A second double-click with the Command key brings the open card to the front.
 - Child cards stay in the same vertical order as their rows in the parent, so that the connector lines do not cross. A new card starts level with its row. It stays below the card for the row above it and above the card for the row below it. If there is not enough space, the sibling cards below it move down.
 - A curved line connects the parent row to the header of the child card. If the row scrolls out of view, the line starts at the top or bottom edge of the list.
-- When you close a card, all cards that were opened from it also close, also the cards that have no line at that time.
+- When you close a card, a card that was opened from it also closes only if a line connects the two cards at that time. The same rule applies to the cards opened from each closed card.
+- A card that has no line to the closed card stays open. It becomes an independent card: it is not related to the closed card (`parentID`) and it does not get a line again.
 
 ## Known limits and open questions
 
-- It is not decided if closing a card must also close its child cards. At the moment, it does.
+- It is not decided if closing a card must also close its child cards. At the moment, it closes the child cards that have a line.
+- The restore does not use the line rule. If a saved folder does not exist, all cards opened from its card are not restored, also the cards that had no line.
 - When a card changes its view mode, its height changes (if it has no fixed height). A resize also changes the height. Its child cards do not move, so they can overlap or the lines can cross.
 - When sibling cards move down, the cards opened from them do not move. Lines further down the tree can then cross.
 - Child card order uses the row order, not the current card positions. If you drag a child card out of order, a new card can overlap it.

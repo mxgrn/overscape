@@ -350,12 +350,16 @@ struct FolderCardView: View {
 
 private extension View {
     /// Scrolls the item area of the card when the selected item is not fully in view,
-    /// for example after an arrow key.
+    /// for example after an arrow key. The model makes the decision (`scrollEdge`).
     func showsSelection(of model: CanvasModel, in card: FolderCard) -> some View {
         ScrollViewReader { proxy in
             onChange(of: model.selection) { _, selection in
                 guard let selection, selection.cardID == card.id else { return }
-                proxy.scrollTo(selection.url)
+                switch model.scrollEdge(for: selection) {
+                case .top: proxy.scrollTo(selection.url, anchor: .top)
+                case .bottom: proxy.scrollTo(selection.url, anchor: .bottom)
+                case nil: break
+                }
             }
         }
     }

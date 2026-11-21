@@ -82,6 +82,25 @@ struct CanvasModelTests {
         #expect(model.cards.isEmpty)
     }
 
+    @Test func closeKeepsTheChildCardsThatHaveNoLine() throws {
+        let root = try makeFolder(subfolders: ["a/b"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        let folder = card.entries[0].url
+        model.openChild(of: card.id, folder: folder)
+        // The card shows the folder of its child card, so the line to that child card goes.
+        model.open(folder, in: card.id)
+        model.openChild(of: card.id, folder: model.cards[0].entries[0].url)
+        #expect(model.connections.map(\.id) == [model.cards[2].id])
+
+        model.close(card.id)
+
+        #expect(model.cards.map(\.url) == [folder])
+        #expect(model.cards[0].parentID == nil)
+    }
+
     @Test func escapeClosesOnlyTheCardUnderTheCursor() throws {
         let root = try makeFolder(subfolders: ["a"])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -358,6 +377,25 @@ struct CanvasModelTests {
         model.clearSelection()
         model.perform(.moveSelection(.up))
         #expect(model.selection?.url == rows[2])
+    }
+
+    @Test func onlyAnItemThatIsNotFullyInViewGetsAScrollEdge() throws {
+        let root = try makeFolder(subfolders: (0..<30).map { "folder\($0)" })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        func edge(_ index: Int) -> ScrollEdge? {
+            model.scrollEdge(for: ItemRef(cardID: card.id, url: card.entries[index].url))
+        }
+
+        #expect(edge(0) == nil)
+        #expect(edge(29) == .bottom)
+
+        model.setScrollOffset(card.id, -100)
+
+        #expect(edge(0) == .top)
+        #expect(edge(10) == nil)
     }
 
     @Test func anArrowKeyMovesTheSelectionToTheCardUnderTheCursor() throws {
