@@ -268,6 +268,23 @@ struct FileOperationsTests {
         #expect(copy.lastPathComponent == "v1.2 copy")
     }
 
+    @Test func aDoubleClickOnAFileOpensTheFile() throws {
+        let root = try makeFolder(items: ["a.txt"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let file = model.cards[0].entries[0].url
+        var opened: [URL] = []
+        model.openFile = { opened.append($0); return true }
+
+        model.open(file, in: model.cards[0].id, inChildCard: true)
+        #expect(opened.isEmpty)
+
+        model.open(file, in: model.cards[0].id)
+        #expect(opened == [file])
+        #expect(model.cards.count == 1)
+    }
+
     /// The names of the items in the card, in alphabetical order.
     private func names(in card: FolderCard) -> [String] {
         card.entries.map(\.name).sorted()

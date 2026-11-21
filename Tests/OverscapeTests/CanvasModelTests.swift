@@ -253,6 +253,60 @@ struct CanvasModelTests {
         #expect(model.cards[1].position == CGPoint(x: first.minX + 30, y: first.minY + 30))
     }
 
+    @Test func aDoubleClickOnAFolderShowsItInTheSameCardAndCommandUpBringsTheLinesBack() throws {
+        let root = try makeFolder(subfolders: ["a/b"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        model.openChild(of: model.cards[0].id, folder: model.cards[0].entries[0].url)
+        let card = model.cards[1]
+        let subfolder = card.entries[0].url
+        model.openChild(of: card.id, folder: subfolder)
+        let child = model.cards[2]
+
+        model.open(subfolder, in: card.id)
+        model.reload()
+
+        #expect(model.cards.map(\.url) == [model.cards[0].url, subfolder, subfolder])
+        #expect(model.cards[1].position == card.position)
+        #expect(model.connections.isEmpty)
+
+        model.setHovered(card.id, true)
+        model.perform(.showParentFolder)
+
+        #expect(model.connections.map(\.id) == [card.id, child.id])
+    }
+
+    @Test func aDoubleClickWithCommandOpensAFolderInAChildCard() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let parent = model.cards[0]
+
+        model.open(parent.entries[0].url, in: parent.id, inChildCard: true)
+
+        #expect(model.cards.map(\.url) == [parent.url, parent.entries[0].url])
+        #expect(model.cards[1].parentID == parent.id)
+    }
+
+    @Test func commandUpShowsTheParentFolderAndSelectsTheFolderFromBefore() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        let subfolder = card.entries[0].url
+        model.open(subfolder, in: card.id)
+
+        #expect(!model.perform(.showParentFolder))
+        model.setHovered(card.id, true)
+        #expect(model.perform(.showParentFolder))
+
+        #expect(model.cards[0].entries.map(\.url) == [subfolder])
+        #expect(model.selection == ItemRef(cardID: card.id, url: subfolder))
+    }
+
     private func makeFolder(subfolders: [String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         for name in subfolders {

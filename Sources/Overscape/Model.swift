@@ -25,6 +25,7 @@ struct FolderCard: Identifiable {
     var position: CGPoint
     var entries: [FileEntry]
     /// The card that this card was opened from. Nil for a dropped folder.
+    /// The connector line shows only while the folder of this card is an item in that card.
     var parentID: UUID? = nil
     /// How far the file list is scrolled (0 or negative), in canvas points.
     var scrollOffset: CGFloat = 0
@@ -182,7 +183,15 @@ enum FolderLoader {
     }
 
     static func isDirectory(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        // A URL keeps the values that it read before. Remove them, so that the answer comes from disk.
+        var url = url
+        url.removeAllCachedResourceValues()
+        return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+    }
+
+    /// A package (an app, for example) is a folder that Finder shows as one file.
+    static func isPackage(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isPackageKey]).isPackage) ?? false
     }
 }
 
@@ -243,6 +252,7 @@ enum TransferKind {
 /// A keyboard command for the canvas.
 enum CanvasCommand: Equatable {
     case viewMode(CardViewMode)
+    case showParentFolder
     case rename
     case moveToTrash
     case copy
@@ -278,6 +288,9 @@ final class CanvasModel {
     @ObservationIgnored var pasteboard: NSPasteboard = .general
     /// Moves an item to the Trash. Tests set a different function to keep the Trash clean.
     @ObservationIgnored var trash: (URL) throws -> URL? = FileOperations.trash
+    /// Opens a file in its default app. Returns false when the file did not open.
+    /// Tests set a different function, so that no app starts.
+    @ObservationIgnored var openFile: (URL) -> Bool = { NSWorkspace.shared.open($0) }
     @ObservationIgnored private var undoSteps: [UndoStep] = []
 
     /// Viewport: a canvas point `p` shows at `p * zoom + pan` in the view.
@@ -502,6 +515,46 @@ final class CanvasModel {
         ))
     }
 
+    /// Does the double-click on an item in a card. As in Finder, a file opens in its default app
+    /// and a folder shows in the same card. A package (an app, for example) opens as a file.
+    /// With `inChildCard` (the Command key), a folder opens in a child card and a file does nothing.
+    func open(_ url: URL, in cardID: FolderCard.ID, inChildCard: Bool = false) {
+        guard let entry = cards.first(where: { $0.id == cardID })?.entries.first(where: { $0.url == url })
+        else { return }
+        if inChildCard {
+            if entry.isDirectory { openChild(of: cardID, folder: url) }
+        } else if entry.isDirectory, !FolderLoader.isPackage(url) {
+            show(url, in: cardID)
+        } else if !openFile(url) {
+            errorMessage = "The file “\(entry.name)” did not open."
+        }
+    }
+
+    /// Shows the parent folder in the card under the cursor and selects the folder that the card
+    /// showed before, as Command-Up does in Finder.
+    /// Returns false when there is no card under the cursor or the card shows the top folder of the disk.
+    @discardableResult
+    func showParentFolderInHoveredCard() -> Bool {
+        guard let card = cards.first(where: { $0.id == hoveredCardID }), card.url.path != "/" else { return false }
+        show(card.url.deletingLastPathComponent(), in: card.id)
+        select(itemNamed: card.url.lastPathComponent, in: card.id)
+        return true
+    }
+
+    /// Makes the card show a different folder. The card keeps its position and its size.
+    /// The card that it was opened from and the cards that were opened from it stay open and stay related.
+    /// Their connector lines show again when the folders agree with the rows again (`connections`).
+    private func show(_ folder: URL, in cardID: FolderCard.ID) {
+        commitRename()
+        guard FolderLoader.isDirectory(folder),
+              let index = cards.firstIndex(where: { $0.id == cardID })
+        else { return }
+        cards[index].url = folder
+        cards[index].entries = FolderLoader.entries(in: folder)
+        cards[index].scrollOffset = 0 // The new item area starts at the top.
+        if selection?.cardID == cardID { selection = nil }
+    }
+
     func setScrollOffset(_ id: FolderCard.ID, _ offset: CGFloat) {
         guard let index = cards.firstIndex(where: { $0.id == id }), cards[index].scrollOffset != offset else { return }
         cards[index].scrollOffset = offset
@@ -527,6 +580,8 @@ final class CanvasModel {
     }
 
     /// Lines from a row in a parent card to the header of the child card, in canvas points.
+    /// A child card has no line while its folder is not an item in the parent card. This occurs
+    /// when one of the two cards shows a different folder after a double-click or Command-Up.
     var connections: [Connection] {
         cards.compactMap { child in
             guard let parent = cards.first(where: { $0.id == child.parentID }),
@@ -569,9 +624,11 @@ final class CanvasModel {
     // MARK: - Selection
 
     /// Selects an item. A rename of a different item ends and keeps the new name.
+    /// An item that the card does not show is ignored.
     func select(_ url: URL, in cardID: FolderCard.ID) {
         let item = ItemRef(cardID: cardID, url: url)
         if renaming != item { commitRename() }
+        guard isShown(item) else { return }
         selection = item
     }
 
@@ -597,6 +654,7 @@ final class CanvasModel {
     func perform(_ command: CanvasCommand) -> Bool {
         switch command {
         case .viewMode(let mode): setViewModeOfHoveredCard(mode)
+        case .showParentFolder: showParentFolderInHoveredCard()
         case .rename: beginRename()
         case .moveToTrash: trashSelection()
         case .copy: copySelection()
@@ -607,17 +665,13 @@ final class CanvasModel {
     }
 
     /// Reads the file lists of all cards from disk again. A card whose folder does not exist closes.
-    /// A child card whose folder is not in the parent card closes. The cards opened from a closed card also close.
+    /// The cards opened from a closed card also close.
     func reload() {
         for index in cards.indices {
             let entries = FolderLoader.entries(in: cards[index].url)
             if entries != cards[index].entries { cards[index].entries = entries }
         }
-        let stale = cards.filter { card in
-            if !FolderLoader.isDirectory(card.url) { return true }
-            guard let parent = cards.first(where: { $0.id == card.parentID }) else { return false }
-            return !parent.entries.contains { $0.url == card.url }
-        }
+        let stale = cards.filter { !FolderLoader.isDirectory($0.url) }
         for card in stale { close(card.id) }
         if let selection, !isShown(selection) { self.selection = nil }
         if let renaming, !isShown(renaming) { self.renaming = nil }

@@ -2,7 +2,7 @@
 
 Overscape is a macOS app that shows folders as cards on an infinite canvas.
 You drag a folder from Finder onto the canvas. The app shows the folder as a card that lists its files.
-When you double-click a subfolder in a card, a child card opens to the right, with a curved line that connects the two cards.
+When you double-click a subfolder in a card with the Command key, a child card opens to the right, with a curved line that connects the two cards.
 The result is a tree of folders that you can see and move around, like a mind map of the file system.
 
 ## Tech stack
@@ -46,6 +46,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - **Card drag.** A card drag changes the card position in the model during the drag, not only at the end. This makes the connector lines follow the card.
 - **Selection and rename.** The model holds the selected item (`selection`), the item that the user renames (`renaming`) and the text in the name field (`renameDraft`). The keyboard commands need them.
 - **File operations.** The model does all file operations (`rename`, `trashSelection`, `copySelection`, `paste`, `drop`, `undo`). After each operation it calls `reload`, which reads the file lists of all cards again. When an operation fails, the model sets `errorMessage` and the canvas shows an alert.
+- **Double-click.** The card view sends each double-click to the model (`open`), with the state of the Command key. The model makes the decision: open the file, show the folder in the same card, or open a child card.
 - **Keyboard commands.** `CanvasEventView` changes a key into a `CanvasCommand` and the model does it (`perform`). While a text field has the focus, the keys go to the text field.
 
 ## Behavior
@@ -124,7 +125,7 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 ### Live update
 
 - Each card watches its folder (`FolderWatcher`). When an item is added, removed or renamed, in this app or in a different app, the model reads the file lists again (`reload`).
-- A card whose folder does not exist closes. A child card whose folder is not in the parent card closes. The cards opened from a closed card also close.
+- A card whose folder does not exist closes. The cards opened from a closed card also close.
 - A change of only the size or the date of a file does not start an update.
 - When a workspace shows, its file lists are read again.
 
@@ -142,16 +143,26 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - A card has two view modes, as in Finder: list (the default) and icons.
 - Command-1 sets icon mode and Command-2 sets list mode for the card under the cursor. The model knows this card (`hoveredCardID`). If no card is under the cursor, the keys do nothing. A local `NSEvent` monitor catches the keys.
 - Icon mode shows a grid of 64-point icons with the names below. With the default width, there are 4 icons on each line. It has no column headers. The card keeps its width. The grid scrolls when it is taller than `CardLayout.maxListHeight`.
-- In icon mode, a single click selects an icon and a double-click on a folder opens a child card. Icons that have an open child card are not highlighted.
+- In icon mode, a single click selects an icon. A double-click does the same as in list mode. Icons that have an open child card are not highlighted.
 - In icon mode, the connector line starts at the right edge of the card, level with the line of icons.
+
+### Open and navigate
+
+A double-click operates as in Finder.
+
+- A double-click on a file opens the file in its default app. A package (an app, for example) opens as a file. If the file does not open, an alert shows.
+- A double-click on a folder shows that folder in the same card. The card keeps its position, its size and its view mode. The items start at the top.
+- Command-Up shows the parent folder in the card under the cursor (`hoveredCardID`) and selects the folder that the card showed before. If no card is under the cursor, or the card shows the top folder of the disk, the key does nothing.
+- When a card shows a different folder, the card that it was opened from and the cards that were opened from it stay open. The cards stay related (`parentID`), but a connector line shows only while the folder of the child card is an item in the parent card. Thus the lines go when a card shows a different folder, and the lines come back when the card shows the initial folder again.
+- There is no history. A card cannot go back or forward.
 
 ### Child cards
 
-- A double-click on a subfolder row opens a child card to the right of the parent. A double-click on a file does nothing.
-- A parent can have many child cards. A subfolder cannot have two open cards from the same parent. A second double-click brings the open card to the front.
+- A double-click with the Command key on a subfolder opens a child card to the right of the parent. A double-click with the Command key on a file does nothing.
+- A parent can have many child cards. A subfolder cannot have two open cards from the same parent. A second double-click with the Command key brings the open card to the front.
 - Child cards stay in the same vertical order as their rows in the parent, so that the connector lines do not cross. A new card starts level with its row. It stays below the card for the row above it and above the card for the row below it. If there is not enough space, the sibling cards below it move down.
 - A curved line connects the parent row to the header of the child card. If the row scrolls out of view, the line starts at the top or bottom edge of the list.
-- When you close a card, all cards that were opened from it also close.
+- When you close a card, all cards that were opened from it also close, also the cards that have no line at that time.
 
 ## Known limits and open questions
 
@@ -164,6 +175,9 @@ The keys are the same as in Finder. They operate on the selected item. There is 
 - An item cannot be dropped on a folder row to put it into that subfolder. The drop always goes into the folder of the card.
 - The file commands are not in the menu bar. The Edit menu items stay disabled, but the keys work.
 - The favorites cannot be put in a different order.
+- When the folder of a card gets a new name, the scroll position of that card goes back to the top.
+- While a child card shows a different folder, its row in the parent card is free and a second child card can open from that row. When the first card shows the initial folder again, the row has two lines.
+- When a card shows a different folder, the cards opened from it do not move.
 - Undo can fail when a different operation changed the same items after the operation. An alert then shows.
 
 ## Conventions

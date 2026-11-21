@@ -6,7 +6,7 @@ import SwiftUI
 /// - a mouse drag on empty canvas pans,
 /// - a two-finger scroll that starts on empty canvas pans,
 /// - a click on empty canvas removes the selection,
-/// - the keys of Finder become canvas commands (view modes, rename, Trash, copy, paste, undo).
+/// - the keys of Finder become canvas commands (view modes, parent folder, rename, Trash, copy, paste, undo).
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     /// The start of a two-finger scroll. The location is nil when the scroll starts outside the canvas.
@@ -94,6 +94,7 @@ struct CanvasEventView: NSViewRepresentable {
         private static let returnKey: UInt16 = 36
         private static let keypadEnterKey: UInt16 = 76
         private static let deleteKey: UInt16 = 51
+        private static let upArrowKey: UInt16 = 126
 
         private static func command(for event: NSEvent) -> CanvasCommand? {
             let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
@@ -103,6 +104,7 @@ struct CanvasEventView: NSViewRepresentable {
             switch (modifiers, event.keyCode, character) {
             case ([], returnKey, _), ([], keypadEnterKey, _): return .rename
             case (.command, deleteKey, _): return .moveToTrash
+            case (.command, upArrowKey, _): return .showParentFolder
             case (.command, _, "1"): return .viewMode(.icons)
             case (.command, _, "2"): return .viewMode(.list)
             case (.command, _, "c"): return .copy

@@ -128,6 +128,8 @@ struct FolderCardView: View {
                 model.setScrollOffset(card.id, offset)
             }
         }
+        // A different folder gets a new scroll view, so that its items start at the top.
+        .id(card.url)
         .coordinateSpace(.named(Self.listSpace))
         .frame(height: card.contentHeight, alignment: .top)
     }
@@ -162,6 +164,8 @@ struct FolderCardView: View {
                 model.setScrollOffset(card.id, offset)
             }
         }
+        // A different folder gets a new scroll view, so that its items start at the top.
+        .id(card.url)
         .coordinateSpace(.named(Self.listSpace))
         .frame(height: card.contentHeight, alignment: .top)
     }
@@ -201,11 +205,13 @@ struct FolderCardView: View {
         .frame(width: CardLayout.iconCellWidth(width: card.width), height: CardLayout.iconCellHeight, alignment: .top)
         .contentShape(Rectangle())
         .onTapGesture { model.select(entry.url, in: card.id) }
-        .simultaneousGesture(TapGesture(count: 2).onEnded {
-            guard entry.isDirectory else { return }
-            model.openChild(of: card.id, folder: entry.url)
-        })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { open(entry) })
         .onDrag { NSItemProvider(object: entry.url as NSURL) }
+    }
+
+    /// The double-click, as in Finder. With the Command key, a folder opens in a child card.
+    private func open(_ entry: FileEntry) {
+        model.open(entry.url, in: card.id, inChildCard: NSEvent.modifierFlags.contains(.command))
     }
 
     private func isSelected(_ entry: FileEntry) -> Bool {
@@ -246,10 +252,7 @@ struct FolderCardView: View {
         .background(rowBackground(isHighlighted: isSelected(entry), index: index))
         .contentShape(Rectangle())
         .onTapGesture { model.select(entry.url, in: card.id) }
-        .simultaneousGesture(TapGesture(count: 2).onEnded {
-            guard entry.isDirectory else { return }
-            model.openChild(of: card.id, folder: entry.url)
-        })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { open(entry) })
         .onDrag { NSItemProvider(object: entry.url as NSURL) }
     }
 
