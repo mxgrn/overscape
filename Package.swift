@@ -5,7 +5,7 @@ let package = Package(
     name: "Overscape",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "Overscape"),
+        .executableTarget(name: "Overscape", resources: [.copy("Resources/AppIcon.png")]),
         .testTarget(name: "OverscapeTests", dependencies: ["Overscape"]),
     ]
 )

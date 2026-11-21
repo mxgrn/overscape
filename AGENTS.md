@@ -26,7 +26,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 
 | File | Purpose |
 | --- | --- |
-| `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon. It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
+| `Sources/Overscape/OverscapeApp.swift` | App entry point. The `AppDelegate` makes the SwiftPM executable a regular app with a Dock icon (`AppIcon`). It owns the `WorkspacesModel`, restores it at the start and saves it when the app quits. |
 | `Sources/Overscape/Model.swift` | All state and logic: `FileEntry`, `FolderCard`, `CardLayout`, `Connection`, `FolderLoader`, `CanvasSnapshot`, `SnapshotStore`, `ItemRef`, `CanvasCommand`, `UndoStep`, `CanvasModel`. |
 | `Sources/Overscape/FileOperations.swift` | `FileOperations` (copy, move and Trash on disk, free names, the volume check) and `FolderWatcher` (reports changes in a folder). |
 | `Sources/Overscape/Workspaces.swift` | `Workspace`, `WorkspacesSnapshot`, `WorkspacesFile`, `WorkspacesModel`: the list of workspaces, each with its own `CanvasModel` and its own favorites. |
@@ -34,6 +34,8 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 | `Sources/Overscape/CanvasView.swift` | The canvas: dot grid, connector lines, cards, drop target, zoom and pan transform. |
 | `Sources/Overscape/CanvasEventView.swift` | An AppKit `NSView` behind the cards. It handles pinch, scroll, click and drag events on the canvas and changes keys into `CanvasCommand` values. |
 | `Sources/Overscape/FolderCardView.swift` | One card: header, column headers, file list, row selection, the name field for a rename, double-click, drag to move, drag and drop of items. |
+| `Sources/Overscape/Resources/AppIcon.png` | The app icon, 1024 × 1024 pixels. It is a package resource. The app sets it as the Dock icon at the start. |
+| `Assets/AppIcon.svg` | The source of the app icon. It is not part of the build. |
 | `Tests/OverscapeTests/` | Tests for `FolderLoader`, `CanvasModel`, `WorkspacesModel`, save and restore, and the file operations. |
 
 ## Architecture
@@ -188,4 +190,5 @@ A double-click operates as in Finder.
 - In tests for copy and paste, set `model.pasteboard` to a pasteboard with a unique name, so that the tests do not change the system pasteboard.
 - A test must not leave items in the Trash of the user. A test that moves an item to the Trash must put it back with `undo`, or set `model.trash` to a function that removes the item.
 - Run `swift build` and `swift test` after each change. Do not leave compiler warnings.
+- After a change to `Assets/AppIcon.svg`, render it again to `Sources/Overscape/Resources/AppIcon.png` at 1024 × 1024 pixels with a transparent background. Use a renderer that supports SVG filters, for example headless Chrome.
 - In commit messages, describe the change in one short line.

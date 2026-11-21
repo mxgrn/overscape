@@ -14,6 +14,13 @@ struct OverscapeApp: App {
     }
 }
 
+enum AppIcon {
+    /// The app icon. `Assets/AppIcon.svg` is the source of the PNG file.
+    static var image: NSImage? {
+        Bundle.module.url(forResource: "AppIcon", withExtension: "png").flatMap(NSImage.init(contentsOf:))
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let workspaces: WorkspacesModel = {
@@ -31,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A bare SwiftPM executable starts as a background process.
         // Make it a regular app with a Dock icon and bring it to the front.
         NSApp.setActivationPolicy(.regular)
+        // There is no app bundle, so the Dock icon comes from the package resources.
+        NSApp.applicationIconImage = AppIcon.image
         NSApp.activate(ignoringOtherApps: true)
     }
 
