@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import SwiftUI
 
 /// An AppKit view behind the cards that turns raw input into canvas navigation:
@@ -6,8 +7,8 @@ import SwiftUI
 /// - a mouse drag on empty canvas pans,
 /// - a two-finger scroll that starts on empty canvas pans,
 /// - a click on empty canvas removes the selection,
-/// - the keys of Finder become canvas commands (arrow keys, view modes, open, parent folder, rename, new folder,
-///   Trash, copy, paste, undo).
+/// - the keys of Finder become canvas commands (arrow keys, view modes, open, Quick Look, parent folder, rename,
+///   new folder, Trash, copy, paste, undo).
 struct CanvasEventView: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     /// The start of a two-finger scroll. The location is nil when the scroll starts outside the canvas.
@@ -84,10 +85,16 @@ struct CanvasEventView: NSViewRepresentable {
             }
             // The same keys as in Finder. During a rename, the keys go to the name field.
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, event.window === self.window,
-                      !(self.window?.firstResponder is NSText),
+                guard let self, !(self.window?.firstResponder is NSText),
                       let command = Self.command(for: event)
                 else { return event }
+                if event.window is QLPreviewPanel {
+                    // While the Quick Look panel has the keys, the arrow keys continue to move the
+                    // selection, as in Finder. The panel does the other keys: Space and Escape close it.
+                    guard case .moveSelection = command else { return event }
+                } else if event.window !== self.window {
+                    return event
+                }
                 return self.onCommand(command) ? nil : event
             }
         }
@@ -96,6 +103,7 @@ struct CanvasEventView: NSViewRepresentable {
         private static let keypadEnterKey: UInt16 = 76
         private static let deleteKey: UInt16 = 51
         private static let escapeKey: UInt16 = 53
+        private static let spaceKey: UInt16 = 49
         private static let leftArrowKey: UInt16 = 123
         private static let rightArrowKey: UInt16 = 124
         private static let downArrowKey: UInt16 = 125
@@ -110,6 +118,7 @@ struct CanvasEventView: NSViewRepresentable {
             case ([], returnKey, _), ([], keypadEnterKey, _): return .rename
             case (.command, deleteKey, _): return .moveToTrash
             case ([], escapeKey, _): return .closeCard
+            case ([], spaceKey, _): return .quickLook
             case ([], upArrowKey, _): return .moveSelection(.up)
             case ([], downArrowKey, _): return .moveSelection(.down)
             case ([], leftArrowKey, _): return .moveSelection(.left)

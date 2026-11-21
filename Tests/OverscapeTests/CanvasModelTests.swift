@@ -444,6 +444,42 @@ struct CanvasModelTests {
         #expect(model.cards.map(\.url) == [subfolder])
     }
 
+    @Test func spaceOpensAndClosesQuickLookAndTheArrowKeysChangeItsItem() throws {
+        let root = try makeFolder(subfolders: ["a", "b"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        let rows = card.entries.map(\.url)
+
+        #expect(!model.perform(.quickLook))
+
+        model.select(rows[0], in: card.id)
+        #expect(model.perform(.quickLook))
+        #expect(model.quickLookURL == rows[0])
+
+        // No card is under the cursor: the cursor can be on the Quick Look panel.
+        model.perform(.moveSelection(.down))
+        #expect(model.quickLookURL == rows[1])
+
+        #expect(model.perform(.quickLook))
+        #expect(model.quickLookURL == nil)
+    }
+
+    @Test func quickLookClosesWhenNoItemIsSelected() throws {
+        let root = try makeFolder(subfolders: ["a"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CanvasModel()
+        model.addFolders([root], at: .zero)
+        let card = model.cards[0]
+        model.select(card.entries[0].url, in: card.id)
+        model.perform(.quickLook)
+
+        model.clearSelection()
+
+        #expect(model.quickLookURL == nil)
+    }
+
     private func makeFolder(subfolders: [String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         for name in subfolders {

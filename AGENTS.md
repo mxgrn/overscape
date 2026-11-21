@@ -115,6 +115,7 @@ The executable is at `.build/debug/Overscape`. When the last window closes, the 
 - In icon mode, the four keys select the adjacent icon. Left and Right continue on the line above or below. When the last line is shorter, Down from the line above it selects the last icon.
 - If the card has no selected item, Down and Right select the first item, and Up and Left select the last item. This also applies when the selected item is in a different card: the selection moves to the card under the cursor.
 - At the first or the last item, the selection does not change.
+- While Quick Look is open, the arrow keys move the selection in the card that has the selected item, also when no card is under the cursor.
 - The item area scrolls to show the selected item, also after a click on an item that is not fully in view. An item that is fully in view does not move. The model finds if the item is fully in view and which edge it must go to (`scrollEdge`). The card view then scrolls (`showsSelection`). Do not use `scrollTo` without an anchor: it also moves an item that is in view when the card is not fully in the window.
 
 ### File operations
@@ -170,6 +171,14 @@ A double-click operates as in Finder.
 - Command-Up shows the parent folder in the card under the cursor (`hoveredCardID`) and selects the folder that the card showed before. If no card is under the cursor, or the card shows the top folder of the disk, the key does nothing.
 - When a card shows a different folder, the card that it was opened from and the cards that were opened from it stay open. The cards stay related (`parentID`), but a connector line shows only while the folder of the child card is an item in the parent card. Thus the lines go when a card shows a different folder, and the lines come back when the card shows the initial folder again.
 - There is no history. A card cannot go back or forward.
+
+### Quick Look
+
+- Space opens the Quick Look panel for the selected item, as in Finder. The selected item can be in a card that is not under the cursor. If no item is selected, the key does nothing.
+- Space or Escape closes the panel.
+- The model holds the item that the panel shows (`quickLookURL`). The canvas view shows the panel (`quickLookPreview`).
+- While the panel is open, it shows the selected item. When the selection changes (a click or an arrow key), the panel shows the new item. When no item is selected, the panel closes.
+- While the panel has the keys, the key monitor of `CanvasEventView` sends only the arrow keys to the model. The panel does the other keys.
 
 ### Child cards
 

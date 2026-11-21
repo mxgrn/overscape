@@ -286,6 +286,7 @@ enum CanvasCommand: Equatable {
     case viewMode(CardViewMode)
     case moveSelection(ArrowDirection)
     case openSelection
+    case quickLook
     case showParentFolder
     case closeCard
     case rename
@@ -314,7 +315,13 @@ final class CanvasModel {
     private(set) var hoveredCardID: FolderCard.ID?
 
     /// The selected item. The canvas has not more than one selected item.
-    private(set) var selection: ItemRef?
+    private(set) var selection: ItemRef? {
+        // While Quick Look is open, it shows the selected item. Without a selected item, it closes.
+        didSet { if quickLookURL != nil { quickLookURL = selection?.url } }
+    }
+    /// The item that Quick Look shows. Nil while Quick Look is closed.
+    /// The view sets nil when the user closes the Quick Look panel.
+    var quickLookURL: URL?
     /// The item that the user renames at this time.
     private(set) var renaming: ItemRef?
     /// The text in the name field during a rename.
@@ -697,10 +704,14 @@ final class CanvasModel {
     /// Moves the selection in the card under the cursor to the adjacent item, as the arrow keys do in Finder.
     /// If the card has no selected item, Down and Right select the first item and Up and Left select the last item.
     /// In list mode, Left and Right do nothing. In icon mode, Left and Right continue on the adjacent line.
+    /// While Quick Look is open, the selection moves in the card that has the selected item.
     /// Returns false when there is no card under the cursor.
     @discardableResult
     func moveSelectionInHoveredCard(_ direction: ArrowDirection) -> Bool {
-        guard let card = cards.first(where: { $0.id == hoveredCardID }) else { return false }
+        // While Quick Look is open, the cursor can be on the Quick Look panel and not on a card.
+        // The keys then go to the card that has the selected item.
+        let cardID = quickLookURL != nil ? selection?.cardID : hoveredCardID
+        guard let card = cards.first(where: { $0.id == cardID }) else { return false }
         let isForward = direction == .down || direction == .right
         let isHorizontal = direction == .left || direction == .right
         if card.viewMode == .list, isHorizontal { return true }
@@ -730,6 +741,19 @@ final class CanvasModel {
     func openSelection() -> Bool {
         guard let selection, isShown(selection) else { return false }
         open(selection.url, in: selection.cardID)
+        return true
+    }
+
+    /// Opens Quick Look for the selected item, as the Space key does in Finder.
+    /// If Quick Look is open, it closes. Returns false when Quick Look is closed and no item is selected.
+    @discardableResult
+    func toggleQuickLook() -> Bool {
+        if quickLookURL != nil {
+            quickLookURL = nil
+            return true
+        }
+        guard let selection, isShown(selection) else { return false }
+        quickLookURL = selection.url
         return true
     }
 
@@ -765,6 +789,7 @@ final class CanvasModel {
         case .viewMode(let mode): setViewModeOfHoveredCard(mode)
         case .moveSelection(let direction): moveSelectionInHoveredCard(direction)
         case .openSelection: openSelection()
+        case .quickLook: toggleQuickLook()
         case .showParentFolder: showParentFolderInHoveredCard()
         case .closeCard: closeHoveredCard()
         case .rename: beginRename()

@@ -1,3 +1,4 @@
+import QuickLook
 import SwiftUI
 
 struct CanvasView: View {
@@ -71,6 +72,9 @@ struct CanvasView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        // The Space key opens the Quick Look panel for the selected item. When the user closes the panel,
+        // the binding gets nil.
+        .quickLookPreview(Binding(get: { model.quickLookURL }, set: { model.quickLookURL = $0 }))
         // The files can change while a different workspace shows.
         .task { model.reload() }
     }
